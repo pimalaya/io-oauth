@@ -1,0 +1,45 @@
+[package]
+name = "io-oauth"
+description = "Set of I/O-free coroutines to manage OAuth flows"
+version = "0.0.1"
+authors = ["soywod <clement.douin@posteo.net>"]
+rust-version = "1.56"
+edition = "2021"
+license = "MIT"
+categories = ["api-bindings"]
+keywords = ["io-free", "coroutine", "oauth", "rfc6749", "rfc7636"]
+homepage = "https://pimalaya.org"
+documentation = "https://docs.rs/io-oauth/latest/io_oauth"
+repository = "https://github.com/pimalaya/io-oauth"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+oauth2 = []
+pkce = ["dep:sha2"]
+
+rfc6749 = ["oauth2"]
+rfc7636 = ["pkce"]
+
+[dev-dependencies]
+env_logger = "0.11"
+io-stream = { version = "0.0.1", default-features = false, features = ["std"] }
+rustls = "0.23"
+rustls-platform-verifier = "0.5"
+
+[dependencies]
+base64 = "0.22"
+http = "1.3"
+io-http = { version = "0.0.1", default-features = false }
+io-stream = { version = "0.0.1", default-features = false }
+log = "0.4"
+rand = "0.9"
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = { version = "=0.11.0-rc.0", features = ["zeroize"], optional = true }
+url = { version = "2.5", features = ["serde"] }
