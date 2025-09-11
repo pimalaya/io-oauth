@@ -25,7 +25,7 @@ pub struct PkceCodeChallenge {
 
 impl PkceCodeChallenge {
     /// Returns a base64-encoded version of the PKCE code challenge.
-    pub fn encode(&self) -> Cow<str> {
+    pub fn encode(&self) -> Cow<'_, str> {
         match self.method {
             PkceCodeChallengeMethod::Plain => {
                 let verifier = self.verifier.expose();

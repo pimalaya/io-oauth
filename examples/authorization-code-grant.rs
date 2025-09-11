@@ -8,8 +8,12 @@ use std::{
 
 use http::{header::HOST, Request};
 use io_oauth::v2_0::authorization_code_grant::{
-    AccessTokenRequestParams, AuthorizationRequestParams, AuthorizationResponseParams,
-    SendAccessTokenRequest, State,
+    access_token_request::{
+        AccessTokenRequestParams, RequestOauth2AccessToken, RequestOauth2AccessTokenResult,
+    },
+    authorization_request::AuthorizationRequestParams,
+    authorization_response::AuthorizeParams,
+    state::State,
 };
 use io_stream::runtimes::std::handle;
 use rustls::{ClientConfig, ClientConnection, StreamOwned};
@@ -53,7 +57,7 @@ fn main() {
         client_id: client_id.as_str().into(),
         redirect_uri: Some(redirect_uri.clone().into()),
         scope: scope.split_whitespace().map(Into::into).collect(),
-        state: Some(Cow::Owned(State::new())),
+        state: Some(Cow::Owned(State::default())),
         #[cfg(feature = "pkce")]
         pkce_code_challenge: None,
     };
@@ -69,7 +73,11 @@ fn main() {
     let redirected_uri: Url = read_line("Redirected URI?").parse().unwrap();
     println!();
 
-    let response_params = AuthorizationResponseParams::from_url(&redirected_uri).unwrap();
+    let response_params = AuthorizeParams::from(&redirected_uri);
+
+    let AuthorizeParams::Success(response_params) = response_params else {
+        panic!("invalid response params");
+    };
 
     if request_params.state != response_params.state {
         panic!("states mismatch");
@@ -86,17 +94,17 @@ fn main() {
         redirect_uri: Some(redirect_uri.into()),
         client_id: client_id.into(),
         #[cfg(feature = "pkce")]
-        pkce_code_challenge: None,
+        pkce_code_verifier: None,
     };
 
-    let mut send = SendAccessTokenRequest::new(request, params).unwrap();
+    let mut send = RequestOauth2AccessToken::new(request, params).unwrap();
     let mut arg = None;
 
     let res = loop {
         match send.resume(arg.take()) {
-            Err(io) => arg = Some(handle(&mut stream, io).unwrap()),
-            Ok(Err(err)) => panic!("parse response error: {err}"),
-            Ok(Ok(res)) => break res,
+            RequestOauth2AccessTokenResult::Ok(res) => break res,
+            RequestOauth2AccessTokenResult::Io(io) => arg = Some(handle(&mut stream, io).unwrap()),
+            RequestOauth2AccessTokenResult::Err(err) => panic!("parse response error: {err}"),
         }
     };
 
@@ -136,7 +144,7 @@ fn connect(url: &Url) -> Box<dyn StreamExt> {
     let domain = url.domain().unwrap();
 
     if url.scheme().eq_ignore_ascii_case("https") {
-        let config = ClientConfig::with_platform_verifier();
+        let config = ClientConfig::with_platform_verifier().unwrap();
         let server_name = domain.to_string().try_into().unwrap();
         let conn = ClientConnection::new(Arc::new(config), server_name).unwrap();
         let tcp = TcpStream::connect((domain.to_string(), 443)).unwrap();

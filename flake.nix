@@ -1,5 +1,5 @@
 {
-  description = "Set of I/O-free Rust coroutines to manage HTTP streams";
+  description = "Set of I/O-free Rust coroutines to manage OAuth flows";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";

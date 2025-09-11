@@ -62,8 +62,10 @@ pub struct AuthorizationRequestParams<'a> {
     /// and each string adds an additional access range to the
     /// requested scope.
     ///
-    ///     scope       = scope-token *( SP scope-token )
-    ///     scope-token = 1*( %x21 / %x23-5B / %x5D-7E )
+    /// ```bnf
+    /// scope       = scope-token *( SP scope-token )
+    /// scope-token = 1*( %x21 / %x23-5B / %x5D-7E )
+    /// ```
     ///
     /// Refs: https://datatracker.ietf.org/doc/html/rfc6749#section-3.3
     // TODO: validate scope tokens?

@@ -5,14 +5,35 @@
 use std::{borrow::Cow, collections::HashSet};
 
 use http::{header::CONTENT_TYPE, request};
-use io_http::v1_1::coroutines::Send;
-use io_stream::Io;
+use io_http::v1_1::coroutines::send::{SendHttp, SendHttpError, SendHttpResult};
+use io_stream::io::StreamIo;
 use secrecy::{ExposeSecret, SecretString};
+use thiserror::Error;
 use url::form_urlencoded::Serializer;
 
 use super::issue_access_token::{
     AccessTokenResponse, IssueAccessTokenErrorParams, IssueAccessTokenSuccessParams,
 };
+
+/// Errors that can occur during the coroutine progression.
+#[derive(Debug, Error)]
+pub enum RefreshOauth2AccessTokenError {
+    #[error(transparent)]
+    SendHttpRefresh(#[from] SendHttpError),
+    #[error(transparent)]
+    ParseHttpResponse(#[from] serde_json::Error),
+}
+
+/// Send result returned by the coroutine's resume function.
+#[derive(Debug)]
+pub enum RefreshOauth2AccessTokenResult {
+    /// The coroutine has successfully terminated its execution.
+    Ok(AccessTokenResponse),
+    /// The coroutine wants stream I/O.
+    Io(StreamIo),
+    /// The coroutine encountered an error.
+    Err(RefreshOauth2AccessTokenError),
+}
 
 /// The I/O-free coroutine to refresh an access token.
 ///
@@ -21,9 +42,9 @@ use super::issue_access_token::{
 /// response.
 ///
 /// Refs: [`AccessTokenResponse`]
-pub struct RefreshAccessToken(Send);
+pub struct RefreshOauth2AccessToken(SendHttp);
 
-impl RefreshAccessToken {
+impl RefreshOauth2AccessToken {
     /// Creates a new I/O-free coroutine to refresh an access token.
     pub fn new(
         request: request::Builder,
@@ -33,28 +54,30 @@ impl RefreshAccessToken {
             .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(body.to_string().into_bytes())?;
 
-        let send = Send::new(request);
+        let send = SendHttp::new(request);
         Ok(Self(send))
     }
 
     /// Makes the coroutine progress.
-    pub fn resume(
-        &mut self,
-        input: Option<Io>,
-    ) -> Result<serde_json::Result<AccessTokenResponse>, Io> {
-        let response = self.0.resume(input)?;
+    pub fn resume(&mut self, arg: Option<StreamIo>) -> RefreshOauth2AccessTokenResult {
+        let response = match self.0.resume(arg) {
+            SendHttpResult::Ok(result) => result.response,
+            SendHttpResult::Io(io) => return RefreshOauth2AccessTokenResult::Io(io),
+            SendHttpResult::Err(err) => return RefreshOauth2AccessTokenResult::Err(err.into()),
+        };
+
         let body = response.body().as_slice();
 
-        if response.status().is_success() {
-            match IssueAccessTokenSuccessParams::try_from(body) {
-                Ok(res) => Ok(Ok(Ok(res))),
-                Err(err) => Ok(Err(err)),
-            }
-        } else {
-            match IssueAccessTokenErrorParams::try_from(body) {
-                Ok(res) => Ok(Ok(Err(res))),
-                Err(err) => Ok(Err(err)),
-            }
+        if !response.status().is_success() {
+            return match IssueAccessTokenErrorParams::try_from(body) {
+                Ok(res) => RefreshOauth2AccessTokenResult::Ok(Err(res)),
+                Err(err) => RefreshOauth2AccessTokenResult::Err(err.into()),
+            };
+        }
+
+        match IssueAccessTokenSuccessParams::try_from(body) {
+            Ok(res) => RefreshOauth2AccessTokenResult::Ok(Ok(res)),
+            Err(err) => RefreshOauth2AccessTokenResult::Err(err.into()),
         }
     }
 }

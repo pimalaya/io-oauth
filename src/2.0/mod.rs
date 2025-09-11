@@ -8,12 +8,3 @@ pub mod authorization_code_grant;
 pub mod issue_access_token;
 #[path = "refresh-access-token.rs"]
 pub mod refresh_access_token;
-
-#[doc(inline)]
-pub use self::{
-    issue_access_token::{
-        AccessTokenResponse, IssueAccessTokenErrorCode, IssueAccessTokenErrorParams,
-        IssueAccessTokenSuccessParams,
-    },
-    refresh_access_token::{RefreshAccessToken, RefreshAccessTokenParams},
-};

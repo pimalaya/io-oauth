@@ -1,7 +1,5 @@
 # I/O OAuth [![Documentation](https://img.shields.io/docsrs/io-oauth)](https://docs.rs/io-oauth/latest/io_oauth) [![Matrix](https://img.shields.io/matrix/pimalaya:matrix.org?color=success&label=chat)](https://matrix.to/#/#pimalaya:matrix.org)
 
-*🚧 Work in progress, stay tuned! 🚧*
-
 Set of **I/O-free** Rust coroutines to manage OAuth flows, based on [io-stream](https://github.com/pimalaya/io-stream).
 
 This library allows you to manage OAuth flows using an I/O-agnostic approach, based on 3 concepts:
@@ -30,7 +28,16 @@ The loop is the glue between coroutines and runtimes. It makes the coroutine pro
 
 Have a look at projects built on the top of this library:
 
-- *TODO*
+- [Ortie](https://github.com/pimalaya/ortie): CLI to manage OAuth access tokens
+
+## License
+
+This project is licensed under either of:
+
+- [MIT license](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+at your option.
 
 ## Sponsoring
 

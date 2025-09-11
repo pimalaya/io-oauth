@@ -1,8 +1,9 @@
 use std::borrow::Cow;
 
 use http::{header::CONTENT_TYPE, request};
-use io_http::v1_1::coroutines::Send;
-use io_stream::Io;
+use io_http::v1_1::coroutines::send::{SendHttp, SendHttpError, SendHttpResult};
+use io_stream::io::StreamIo;
+use thiserror::Error;
 use url::form_urlencoded::Serializer;
 
 use crate::v2_0::issue_access_token::{
@@ -51,6 +52,26 @@ impl ToString for AccessTokenRequestParams<'_> {
     }
 }
 
+/// Errors that can occur during the coroutine progression.
+#[derive(Debug, Error)]
+pub enum RequestOauth2AccessTokenError {
+    #[error(transparent)]
+    SendHttpRequest(#[from] SendHttpError),
+    #[error(transparent)]
+    ParseHttpResponse(#[from] serde_json::Error),
+}
+
+/// Send result returned by the coroutine's resume function.
+#[derive(Debug)]
+pub enum RequestOauth2AccessTokenResult {
+    /// The coroutine has successfully terminated its execution.
+    Ok(AccessTokenResponse),
+    /// The coroutine wants stream I/O.
+    Io(StreamIo),
+    /// The coroutine encountered an error.
+    Err(RequestOauth2AccessTokenError),
+}
+
 /// The authorization code grant type is used to obtain both access
 /// tokens and refresh tokens and is optimized for confidential
 /// clients. Since this is a redirection-based flow, the client must
@@ -59,11 +80,10 @@ impl ToString for AccessTokenRequestParams<'_> {
 /// requests (via redirection) from the authorization server.
 ///
 /// Refs: https://datatracker.ietf.org/doc/html/rfc6749#section-4.1
-///
 #[derive(Debug)]
-pub struct SendAccessTokenRequest(Send);
+pub struct RequestOauth2AccessToken(SendHttp);
 
-impl SendAccessTokenRequest {
+impl RequestOauth2AccessToken {
     pub fn new(
         request: request::Builder,
         body: AccessTokenRequestParams<'_>,
@@ -72,26 +92,28 @@ impl SendAccessTokenRequest {
             .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(body.to_string().into_bytes())?;
 
-        Ok(Self(Send::new(request)))
+        Ok(Self(SendHttp::new(request)))
     }
 
-    pub fn resume(
-        &mut self,
-        input: Option<Io>,
-    ) -> Result<serde_json::Result<AccessTokenResponse>, Io> {
-        let response = self.0.resume(input)?;
+    pub fn resume(&mut self, input: Option<StreamIo>) -> RequestOauth2AccessTokenResult {
+        let response = match self.0.resume(input) {
+            SendHttpResult::Ok(result) => result.response,
+            SendHttpResult::Io(io) => return RequestOauth2AccessTokenResult::Io(io),
+            SendHttpResult::Err(err) => return RequestOauth2AccessTokenResult::Err(err.into()),
+        };
+
         let body = response.body().as_slice();
 
-        if response.status().is_success() {
-            match IssueAccessTokenSuccessParams::try_from(body) {
-                Ok(res) => Ok(Ok(Ok(res))),
-                Err(err) => Ok(Err(err)),
-            }
-        } else {
-            match IssueAccessTokenErrorParams::try_from(body) {
-                Ok(res) => Ok(Ok(Err(res))),
-                Err(err) => Ok(Err(err)),
-            }
+        if !response.status().is_success() {
+            return match IssueAccessTokenErrorParams::try_from(body) {
+                Ok(res) => RequestOauth2AccessTokenResult::Ok(Err(res)),
+                Err(err) => RequestOauth2AccessTokenResult::Err(err.into()),
+            };
+        }
+
+        match IssueAccessTokenSuccessParams::try_from(body) {
+            Ok(res) => RequestOauth2AccessTokenResult::Ok(Ok(res)),
+            Err(err) => RequestOauth2AccessTokenResult::Err(err.into()),
         }
     }
 }
