@@ -1,7 +1,7 @@
 [package]
 name = "io-oauth"
 description = "Set of I/O-free coroutines to manage OAuth flows"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["soywod <clement.douin@posteo.net>"]
 rust-version = "1.56"
 edition = "2021"
@@ -34,7 +34,7 @@ rustls-platform-verifier = "0.6"
 [dependencies]
 base64 = "0.22"
 http = "1.3"
-io-http = { version = "0.0.2", default-features = false }
+io-http = { version = "0.0.3", default-features = false }
 io-stream = { version = "0.0.2", default-features = false }
 log = "0.4"
 rand = "0.9"
