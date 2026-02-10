@@ -66,10 +66,7 @@ impl PkceCodeVerifier {
         // code-verifier = 43*128unreserved
         let size = size.max(43).min(128) as usize;
 
-        let random: Vec<u8> = UNRESERVED
-            .choose_multiple(&mut rand::rng(), size)
-            .cloned()
-            .collect();
+        let random: Vec<u8> = UNRESERVED.sample(&mut rand::rng(), size).cloned().collect();
 
         Self(SecretBox::from(random))
     }
@@ -85,7 +82,7 @@ impl Default for PkceCodeVerifier {
     fn default() -> Self {
         // code-verifier = 43*128unreserved
         let random: [u8; 43] = UNRESERVED
-            .choose_multiple_array(&mut rand::rng())
+            .sample_array(&mut rand::rng())
             // SAFETY: unreserved is not empty
             .unwrap();
 

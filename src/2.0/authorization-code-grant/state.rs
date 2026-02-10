@@ -31,7 +31,7 @@ impl State {
     /// Generates a new random state of custom size.
     pub fn new(size: u8) -> Self {
         let random: Vec<u8> = VSCHAR
-            .choose_multiple(&mut rand::rng(), size as usize)
+            .sample(&mut rand::rng(), size as usize)
             .cloned()
             .collect();
 
@@ -56,7 +56,7 @@ impl PartialEq for State {
 impl Default for State {
     fn default() -> Self {
         let random: [u8; 32] = VSCHAR
-            .choose_multiple_array(&mut rand::rng())
+            .sample_array(&mut rand::rng())
             // SAFETY: vschar is not empty
             .unwrap();
 
