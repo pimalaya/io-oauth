@@ -1,10 +1,19 @@
-use std::fmt;
+//! Opaque state value used for CSRF protection (section 10.12).
+//!
+//! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-10.12>
 
+use core::fmt;
+
+#[cfg(feature = "client")]
+use alloc::{boxed::Box, vec::Vec};
+use alloc::{format, string::String};
+
+#[cfg(feature = "client")]
 use rand::seq::IndexedRandom;
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{
-    de::{Error, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{Error, Visitor},
 };
 
 // VSCHAR = %x20-7E
@@ -22,13 +31,14 @@ const VSCHAR: [u8; 95] = [
 /// Represents an opaque value used by the client to maintain state
 /// between the request and callback.
 ///
-/// Refs: https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.1,
-///       https://datatracker.ietf.org/doc/html/rfc6749#section-10.12
+/// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.1>,
+///       <https://datatracker.ietf.org/doc/html/rfc6749#section-10.12>
 #[derive(Clone, Debug)]
-pub struct State(SecretBox<[u8]>);
+pub struct Oauth20State(SecretBox<[u8]>);
 
-impl State {
+impl Oauth20State {
     /// Generates a new random state of custom size.
+    #[cfg(feature = "client")]
     pub fn new(size: u8) -> Self {
         let random: Vec<u8> = VSCHAR
             .sample(&mut rand::rng(), size as usize)
@@ -45,15 +55,16 @@ impl State {
     }
 }
 
-impl Eq for State {}
+impl Eq for Oauth20State {}
 
-impl PartialEq for State {
+impl PartialEq for Oauth20State {
     fn eq(&self, other: &Self) -> bool {
         self.expose() == other.expose()
     }
 }
 
-impl Default for State {
+#[cfg(feature = "client")]
+impl Default for Oauth20State {
     fn default() -> Self {
         let random: [u8; 32] = VSCHAR
             .sample_array(&mut rand::rng())
@@ -64,7 +75,7 @@ impl Default for State {
     }
 }
 
-impl Serialize for State {
+impl Serialize for Oauth20State {
     // SAFETY: exposes the random state
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let state = String::from_utf8_lossy(self.expose());
@@ -72,7 +83,7 @@ impl Serialize for State {
     }
 }
 
-impl<'de> Deserialize<'de> for State {
+impl<'de> Deserialize<'de> for Oauth20State {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_any(StateVisitor)
     }
@@ -81,7 +92,7 @@ impl<'de> Deserialize<'de> for State {
 struct StateVisitor;
 
 impl<'de> Visitor<'de> for StateVisitor {
-    type Value = State;
+    type Value = Oauth20State;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str("a string or bytes")
@@ -99,6 +110,6 @@ impl<'de> Visitor<'de> for StateVisitor {
             }
         }
 
-        Ok(State(SecretBox::from(bytes.to_vec())))
+        Ok(Oauth20State(SecretBox::from(bytes.to_vec())))
     }
 }

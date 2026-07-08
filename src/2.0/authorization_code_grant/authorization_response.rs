@@ -1,20 +1,69 @@
-use std::borrow::Cow;
+//! Module dedicated to the section 4.1.2: Authorization Response.
+//!
+//! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2>
+
+use alloc::borrow::Cow;
 
 use log::debug;
 use serde::{
-    de::value::{CowStrDeserializer, Error},
     Deserialize, Serialize,
+    de::value::{CowStrDeserializer, Error},
 };
+use thiserror::Error as ThisError;
 use url::Url;
 
-use super::state::State;
+use crate::v2_0::authorization_code_grant::state::Oauth20State;
 
-pub enum AuthorizeParams<'a> {
-    Success(AuthorizeSuccessParams<'a>),
-    Error(AuthorizeErrorParams<'a>),
+pub enum Oauth20AuthorizeParams<'a> {
+    Success(Oauth20AuthorizeSuccessParams<'a>),
+    Error(Oauth20AuthorizeErrorParams<'a>),
 }
 
-impl<'a> From<&'a Url> for AuthorizeParams<'a> {
+impl<'a> Oauth20AuthorizeParams<'a> {
+    /// Validate the authorization response and return the authorization
+    /// code on success.
+    ///
+    /// When `expected_state` is `Some`, the response must carry a
+    /// matching state (CSRF protection per RFC 6749 §10.12); when
+    /// `None`, the state field is not checked.
+    pub fn validate(
+        self,
+        expected_state: Option<&Oauth20State>,
+    ) -> Result<Cow<'a, str>, Oauth20AuthorizeValidateError<'a>> {
+        match self {
+            Self::Error(err) => Err(Oauth20AuthorizeValidateError::Server(err)),
+            Self::Success(success) => {
+                if let Some(expected) = expected_state {
+                    match &success.state {
+                        None => return Err(Oauth20AuthorizeValidateError::StateMissing),
+                        Some(got) if expected != got.as_ref() => {
+                            return Err(Oauth20AuthorizeValidateError::StateMismatch);
+                        }
+                        Some(_) => {}
+                    }
+                }
+                Ok(success.code)
+            }
+        }
+    }
+}
+
+/// Errors returned by [`Oauth20AuthorizeParams::validate`].
+#[derive(Debug, ThisError)]
+pub enum Oauth20AuthorizeValidateError<'a> {
+    /// The authorization server returned an error response.
+    #[error("Authorization error: {:?}", _0.error)]
+    Server(Oauth20AuthorizeErrorParams<'a>),
+    /// A state was expected in the response but none was returned.
+    #[error("Authorization state missing from response")]
+    StateMissing,
+    /// The state returned by the server does not match the expected
+    /// one (CSRF mismatch).
+    #[error("Authorization state mismatch")]
+    StateMismatch,
+}
+
+impl<'a> From<&'a Url> for Oauth20AuthorizeParams<'a> {
     fn from(url: &'a Url) -> Self {
         let mut code = None;
         let mut state = None;
@@ -30,14 +79,14 @@ impl<'a> From<&'a Url> for AuthorizeParams<'a> {
                 }
                 key if key.eq_ignore_ascii_case("state") => {
                     let deserializer = CowStrDeserializer::<Error>::new(val);
-                    match State::deserialize(deserializer) {
+                    match Oauth20State::deserialize(deserializer) {
                         Ok(valid_state) => state = Some(Cow::Owned(valid_state)),
                         Err(err) => debug!("skip invalid state: {err}"),
                     }
                 }
                 key if key.eq_ignore_ascii_case("error") => {
                     let deserializer = CowStrDeserializer::<Error>::new(val);
-                    match AuthorizeErrorCode::deserialize(deserializer) {
+                    match Oauth20AuthorizeErrorCode::deserialize(deserializer) {
                         Ok(code) => error = Some(code),
                         Err(err) => debug!("skip invalid error code: {err}"),
                     }
@@ -57,17 +106,17 @@ impl<'a> From<&'a Url> for AuthorizeParams<'a> {
         }
 
         if let Some(code) = code {
-            let params = AuthorizeSuccessParams { code, state };
-            return AuthorizeParams::Success(params);
+            let params = Oauth20AuthorizeSuccessParams { code, state };
+            return Oauth20AuthorizeParams::Success(params);
         }
 
-        let params = AuthorizeErrorParams {
-            error: error.unwrap_or(AuthorizeErrorCode::InvalidRequest),
+        let params = Oauth20AuthorizeErrorParams {
+            error: error.unwrap_or(Oauth20AuthorizeErrorCode::InvalidRequest),
             error_description,
             error_uri,
         };
 
-        AuthorizeParams::Error(params)
+        Oauth20AuthorizeParams::Error(params)
     }
 }
 
@@ -80,9 +129,9 @@ impl<'a> From<&'a Url> for AuthorizeParams<'a> {
 /// redirection URI using the "application/x-www-form-urlencoded"
 /// format, per Appendix B.
 ///
-/// Refs: https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2
+/// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2>
 #[derive(Clone, Debug, Deserialize)]
-pub struct AuthorizeSuccessParams<'a> {
+pub struct Oauth20AuthorizeSuccessParams<'a> {
     /// The authorization code generated by the authorization server.
     ///
     /// The authorization code MUST expire shortly after it is issued
@@ -95,7 +144,7 @@ pub struct AuthorizeSuccessParams<'a> {
     /// The authorization code is bound to the client identifier and
     /// redirection URI.
     ///
-    /// Refs: https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2>
     pub code: Cow<'a, str>,
 
     /// An opaque value used by the client to maintain state between
@@ -105,8 +154,8 @@ pub struct AuthorizeSuccessParams<'a> {
     /// the user-agent back to the client.  The parameter SHOULD be
     /// used for preventing cross-site request forgery.
     ///
-    /// Refs: https://datatracker.ietf.org/doc/html/rfc6749#section-10.12
-    pub state: Option<Cow<'a, State>>,
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-10.12>
+    pub state: Option<Cow<'a, Oauth20State>>,
 }
 
 /// The response returned by the authorization server when the the
@@ -117,9 +166,9 @@ pub struct AuthorizeSuccessParams<'a> {
 /// following parameters to the query component of the redirection URI
 /// using the "application/x-www-form-urlencoded" format.
 #[derive(Clone, Debug, Deserialize)]
-pub struct AuthorizeErrorParams<'a> {
+pub struct Oauth20AuthorizeErrorParams<'a> {
     /// A single ASCII error code.
-    pub error: AuthorizeErrorCode,
+    pub error: Oauth20AuthorizeErrorCode,
 
     /// Human-readable ASCII text providing additional information,
     /// used to assist the client developer in understanding the error
@@ -134,7 +183,7 @@ pub struct AuthorizeErrorParams<'a> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AuthorizeErrorCode {
+pub enum Oauth20AuthorizeErrorCode {
     /// The request is missing a required parameter, includes an
     /// invalid parameter value, includes a parameter more than once,
     /// or is otherwise malformed.

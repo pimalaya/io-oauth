@@ -1,10 +1,10 @@
 //! Module dedicated to the OAuth 2.0 Authorization Framework.
 //!
-//! Refs: https://datatracker.ietf.org/doc/html/rfc6749
+//! Refs: <https://datatracker.ietf.org/doc/html/rfc6749>
 
-#[path = "authorization-code-grant/mod.rs"]
 pub mod authorization_code_grant;
-#[path = "issue-access-token.rs"]
+#[cfg(feature = "client")]
+pub mod client;
+pub mod device_authorization_grant;
 pub mod issue_access_token;
-#[path = "refresh-access-token.rs"]
 pub mod refresh_access_token;

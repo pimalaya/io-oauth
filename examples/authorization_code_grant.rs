@@ -1,21 +1,21 @@
 use std::{
     borrow::Cow,
+    collections::BTreeMap,
     env,
-    io::{stdin, stdout, Write},
+    io::{Read, Write, stdin, stdout},
     net::TcpStream,
     sync::Arc,
 };
 
-use http::{header::HOST, Request};
+use io_http::rfc9110::request::HttpRequest;
 use io_oauth::v2_0::authorization_code_grant::{
     access_token_request::{
-        AccessTokenRequestParams, RequestOauth2AccessToken, RequestOauth2AccessTokenResult,
+        Oauth20AccessTokenRequestParams, Oauth20RequestAccessToken, Oauth20RequestAccessTokenResult,
     },
-    authorization_request::AuthorizationRequestParams,
-    authorization_response::AuthorizeParams,
-    state::State,
+    authorization_request::Oauth20AuthorizationRequestParams,
+    authorization_response::Oauth20AuthorizeParams,
+    state::Oauth20State,
 };
-use io_stream::runtimes::std::handle;
 use rustls::{ClientConfig, ClientConnection, StreamOwned};
 use rustls_platform_verifier::ConfigVerifierExt;
 use secrecy::ExposeSecret;
@@ -39,7 +39,7 @@ fn main() {
         Err(_) => read_line("Scope?"),
     };
 
-    let mut auth_uri: Url = match env::var("AUTHORIZATION_URI") {
+    let auth_uri: Url = match env::var("AUTHORIZATION_URI") {
         Ok(url) => url.parse().unwrap(),
         Err(_) => read_line("Authorization URL?").parse().unwrap(),
     };
@@ -53,16 +53,16 @@ fn main() {
 
     // 1. authorization request: build URL for user to browse
 
-    let request_params = AuthorizationRequestParams {
+    let state = Oauth20State::default();
+    let auth_uri = Oauth20AuthorizationRequestParams {
         client_id: client_id.as_str().into(),
         redirect_uri: Some(redirect_uri.clone().into()),
         scope: scope.split_whitespace().map(Into::into).collect(),
-        state: Some(Cow::Owned(State::default())),
-        #[cfg(feature = "pkce")]
+        state: Some(Cow::Borrowed(&state)),
         pkce_code_challenge: None,
-    };
-
-    auth_uri.set_query(Some(&request_params.to_form_url_encoded_string()));
+        extras: BTreeMap::new(),
+    }
+    .build_url(&auth_uri);
 
     println!();
     println!("Navigate to the following URI: {auth_uri}");
@@ -73,13 +73,13 @@ fn main() {
     let redirected_uri: Url = read_line("Redirected URI?").parse().unwrap();
     println!();
 
-    let response_params = AuthorizeParams::from(&redirected_uri);
+    let response_params = Oauth20AuthorizeParams::from(&redirected_uri);
 
-    let AuthorizeParams::Success(response_params) = response_params else {
+    let Oauth20AuthorizeParams::Success(response_params) = response_params else {
         panic!("invalid response params");
     };
 
-    if request_params.state != response_params.state {
+    if Some(Cow::Borrowed(&state)) != response_params.state {
         panic!("states mismatch");
     }
 
@@ -87,24 +87,34 @@ fn main() {
 
     let host = token_uri.host_str().unwrap();
     let port = token_uri.port_or_known_default().unwrap();
-    let request = Request::post(token_uri.path()).header(HOST, format!("{host}:{port}"));
+    let request = HttpRequest {
+        method: "POST".into(),
+        url: token_uri.clone(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    }
+    .header("Host", format!("{host}:{port}"));
 
-    let params = AccessTokenRequestParams {
+    let params = Oauth20AccessTokenRequestParams {
         code: response_params.code,
         redirect_uri: Some(redirect_uri.into()),
         client_id: client_id.into(),
-        #[cfg(feature = "pkce")]
         pkce_code_verifier: None,
     };
 
-    let mut send = RequestOauth2AccessToken::new(request, params).unwrap();
-    let mut arg = None;
+    let mut send = Oauth20RequestAccessToken::new(request, params);
+    let mut buf = [0u8; 4096];
+    let mut arg: Option<&[u8]> = None;
 
     let res = loop {
         match send.resume(arg.take()) {
-            RequestOauth2AccessTokenResult::Ok(res) => break res,
-            RequestOauth2AccessTokenResult::Io(io) => arg = Some(handle(&mut stream, io).unwrap()),
-            RequestOauth2AccessTokenResult::Err(err) => panic!("parse response error: {err}"),
+            Oauth20RequestAccessTokenResult::Ok(res) => break res,
+            Oauth20RequestAccessTokenResult::WantsRead => {
+                let n = stream.read(&mut buf).unwrap();
+                arg = Some(&buf[..n]);
+            }
+            Oauth20RequestAccessTokenResult::WantsWrite(bytes) => stream.write_all(&bytes).unwrap(),
+            Oauth20RequestAccessTokenResult::Err(err) => panic!("send request error: {err}"),
         }
     };
 
@@ -137,8 +147,8 @@ fn read_line(prompt: &str) -> String {
     line.trim().to_owned()
 }
 
-trait StreamExt: std::io::Read + std::io::Write {}
-impl<T: std::io::Read + std::io::Write> StreamExt for T {}
+trait StreamExt: Read + Write {}
+impl<T: Read + Write> StreamExt for T {}
 
 fn connect(url: &Url) -> Box<dyn StreamExt> {
     let domain = url.domain().unwrap();

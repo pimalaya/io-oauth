@@ -1,7 +1,16 @@
-use std::{borrow::Cow, str::FromStr};
+//! Proof Key for Code Exchange by OAuth Public Clients.
+//!
+//! Refs: <https://datatracker.ietf.org/doc/html/rfc7636>
 
-use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
+use core::str::FromStr;
+
+use alloc::{borrow::Cow, string::String};
+#[cfg(feature = "client")]
+use alloc::{boxed::Box, vec::Vec};
+
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use log::debug;
+#[cfg(feature = "client")]
 use rand::seq::IndexedRandom;
 use secrecy::{ExposeSecret, SecretBox};
 use sha2::{Digest, Sha256};
@@ -17,21 +26,22 @@ const UNRESERVED: [u8; 66] = [
     b'_', b'~',
 ];
 
-#[derive(Clone, Debug, Default)]
-pub struct PkceCodeChallenge {
-    pub method: PkceCodeChallengeMethod,
-    pub verifier: PkceCodeVerifier,
+#[cfg_attr(feature = "client", derive(Default))]
+#[derive(Clone, Debug)]
+pub struct Oauth20PkceCodeChallenge {
+    pub method: Oauth20PkceCodeChallengeMethod,
+    pub verifier: Oauth20PkceCodeVerifier,
 }
 
-impl PkceCodeChallenge {
+impl Oauth20PkceCodeChallenge {
     /// Returns a base64-encoded version of the PKCE code challenge.
     pub fn encode(&self) -> Cow<'_, str> {
         match self.method {
-            PkceCodeChallengeMethod::Plain => {
+            Oauth20PkceCodeChallengeMethod::Plain => {
                 let verifier = self.verifier.expose();
                 String::from_utf8_lossy(verifier)
             }
-            PkceCodeChallengeMethod::Sha256 => {
+            Oauth20PkceCodeChallengeMethod::Sha256 => {
                 let digest = Sha256::digest(self.verifier.expose());
                 BASE64_URL_SAFE_NO_PAD.encode(digest).into()
             }
@@ -40,13 +50,13 @@ impl PkceCodeChallenge {
 }
 
 #[derive(Clone, Debug, Default)]
-pub enum PkceCodeChallengeMethod {
+pub enum Oauth20PkceCodeChallengeMethod {
     Plain,
     #[default]
     Sha256,
 }
 
-impl PkceCodeChallengeMethod {
+impl Oauth20PkceCodeChallengeMethod {
     const PLAIN: &'static str = "plain";
     const SHA256: &'static str = "S256";
 
@@ -59,12 +69,13 @@ impl PkceCodeChallengeMethod {
 }
 
 #[derive(Clone, Debug)]
-pub struct PkceCodeVerifier(SecretBox<[u8]>);
+pub struct Oauth20PkceCodeVerifier(SecretBox<[u8]>);
 
-impl PkceCodeVerifier {
+impl Oauth20PkceCodeVerifier {
+    #[cfg(feature = "client")]
     pub fn new(size: u8) -> Self {
-        // code-verifier = 43*128unreserved
-        let size = size.max(43).min(128) as usize;
+        // NOTE: code-verifier = 43*128unreserved
+        let size = size.clamp(43, 128) as usize;
 
         let random: Vec<u8> = UNRESERVED.sample(&mut rand::rng(), size).cloned().collect();
 
@@ -78,9 +89,10 @@ impl PkceCodeVerifier {
     }
 }
 
-impl Default for PkceCodeVerifier {
+#[cfg(feature = "client")]
+impl Default for Oauth20PkceCodeVerifier {
     fn default() -> Self {
-        // code-verifier = 43*128unreserved
+        // NOTE: code-verifier = 43*128unreserved
         let random: [u8; 43] = UNRESERVED
             .sample_array(&mut rand::rng())
             // SAFETY: unreserved is not empty
@@ -90,7 +102,7 @@ impl Default for PkceCodeVerifier {
     }
 }
 
-impl FromStr for PkceCodeVerifier {
+impl FromStr for Oauth20PkceCodeVerifier {
     type Err = u8;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

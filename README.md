@@ -1,24 +1,20 @@
 # I/O OAuth [![Documentation](https://img.shields.io/docsrs/io-oauth)](https://docs.rs/io-oauth/latest/io_oauth) [![Matrix](https://img.shields.io/matrix/pimalaya:matrix.org?color=success&label=chat)](https://matrix.to/#/#pimalaya:matrix.org)
 
-Set of **I/O-free** Rust coroutines to manage OAuth flows, based on [io-stream](https://github.com/pimalaya/io-stream).
+Set of **I/O-free** Rust coroutines to manage OAuth flows, based on [io-http](https://github.com/pimalaya/io-http). Supports the OAuth 2.0 authorization code grant (RFC 6749) with PKCE (RFC 7636) and the device authorization grant (RFC 8628).
 
-This library allows you to manage OAuth flows using an I/O-agnostic approach, based on 3 concepts:
+This library allows you to manage OAuth flows using an I/O-agnostic approach, based on 2 concepts:
 
 ### Coroutine
 
 A coroutine is an *I/O-free*, *resumable* and *composable* state machine that **emits I/O requests**. A coroutine is considered *terminated* when it does not emit I/O requests anymore.
 
-*See available coroutines at [./src/coroutines](https://github.com/pimalaya/io-oauth/tree/master/src).*
-
-### Runtime
-
-A runtime contains all the I/O logic, and is responsible for **processing I/O requests** emitted by coroutines.
-
-*See available runtimes at [io-stream](https://github.com/pimalaya/io-stream/tree/master/src/runtimes).*
+*See available coroutines at [./src](https://github.com/pimalaya/io-oauth/tree/master/src).*
 
 ### Loop
 
-The loop is the glue between coroutines and runtimes. It makes the coroutine progress while allowing runtime to process I/O.
+The loop makes the coroutine progress: when the coroutine yields WantsRead or WantsWrite, the caller reads from or writes to its own stream (blocking, async, TLS or not) and resumes the coroutine with the bytes.
+
+The `client` cargo feature ships a ready-to-use std-blocking loop, `Oauth20ClientStd`, that wraps any stream (or opens one itself with one of the `native-tls`, `rustls-aws` or `rustls-ring` cargo features).
 
 ## Examples
 
@@ -38,6 +34,22 @@ This project is licensed under either of:
 - [Apache License, Version 2.0](LICENSE-APACHE)
 
 at your option.
+
+## AI disclosure
+
+This project is developed with AI assistance. This section documents how, so users and downstream packagers can make informed decisions.
+
+- **Tools**: Claude Code (Anthropic), Opus 4.7, invoked locally with a persistent project-scoped memory and a small set of repo-specific rules.
+
+- **Used for**: Refactors, mechanical multi-file edits, boilerplate (feature gates, error enums, derive macros, trait impls), test scaffolding, doc polish, exploratory design conversations.
+
+- **Not used for**: Engineering, critical code, git manipulation (commit, merge, rebase…), real-world tests.
+
+- **Verification**: Every AI-assisted change is read, compiled, tested, and formatted before commit (`nix develop --command cargo check / cargo test / cargo fmt`). Behavioural correctness is verified against the relevant RFC or upstream spec, not assumed from the model output. Tests are never adjusted to fit AI-generated code; the code is adjusted to fit correct behaviour.
+
+- **Limitations**: AI models occasionally produce code that compiles and passes tests but is subtly wrong: off-by-one errors, missed edge cases, plausible but nonexistent APIs, stale RFC references. The verification workflow catches most of this; it does not catch all of it. Bug reports are welcome and taken seriously.
+
+- **Last reviewed**: 31/05/2026
 
 ## Sponsoring
 
