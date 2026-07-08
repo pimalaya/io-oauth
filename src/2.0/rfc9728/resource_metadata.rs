@@ -7,6 +7,7 @@ use alloc::{string::String, vec::Vec};
 use io_http::{
     coroutine::*,
     rfc9110::{
+        challenge::parse_challenges,
         request::HttpRequest,
         send::{HttpSendOutput, HttpSendYield},
     },
@@ -81,26 +82,16 @@ impl TryFrom<&[u8]> for Oauth20ResourceMetadata {
 }
 
 /// Extracts the `resource_metadata` parameter of a `WWW-Authenticate`
-/// challenge: the URL a protected resource points its 401s at, so a
-/// client discovers the metadata without knowing the well-known rule.
+/// header value (parsed by io-http's rfc9110 challenge module): the
+/// URL a protected resource points its 401s at, so a client discovers
+/// the metadata without knowing the well-known rule.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc9728#section-5.1>
-pub fn challenge_resource_metadata(challenge: &str) -> Option<Url> {
-    let name = "resource_metadata";
-    let start = challenge.to_ascii_lowercase().find(name)? + name.len();
-
-    let rest = challenge[start..].trim_start();
-    let rest = rest.strip_prefix('=')?.trim_start();
-
-    let value = match rest.strip_prefix('"') {
-        Some(quoted) => &quoted[..quoted.find('"')?],
-        None => rest
-            .split([',', ' '])
-            .next()
-            .filter(|value| !value.is_empty())?,
-    };
-
-    Url::parse(value).ok()
+pub fn challenge_resource_metadata(value: &str) -> Option<Url> {
+    parse_challenges(value)
+        .iter()
+        .find_map(|challenge| challenge.param("resource_metadata"))
+        .and_then(|url| Url::parse(url).ok())
 }
 
 /// Errors that can occur during the coroutine progression.
