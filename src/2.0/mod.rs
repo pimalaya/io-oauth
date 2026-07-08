@@ -8,3 +8,6 @@ pub mod client;
 pub mod device_authorization_grant;
 pub mod issue_access_token;
 pub mod refresh_access_token;
+pub mod rfc7591;
+pub mod rfc8414;
+pub mod rfc9728;

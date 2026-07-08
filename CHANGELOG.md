@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the discovery and registration chain of draft-ietf-mailmaint-oauth-public, three RFC-dedicated modules under v2_0:
+
+  - rfc8414::server_metadata: the `Oauth20ServerMetadata` document (endpoints, grants, PKCE methods, the RFC 7591 registration endpoint) with its `Oauth20FetchServerMetadata` coroutine, plus the well-known URL builders (the §3.1 insertion rule and the OpenID Connect Discovery compatibility suffix).
+  - rfc9728::resource_metadata: the `Oauth20ResourceMetadata` document (authorization servers, scopes, bearer methods) with its `Oauth20FetchResourceMetadata` coroutine, the well-known URL builder, and `challenge_resource_metadata` extracting the metadata URL a protected resource advertises on its 401 `WWW-Authenticate`.
+  - rfc7591::client_registration: the `Oauth20RegisterClient` coroutine POSTing `Oauth20RegisterClientParams` to the registration endpoint and returning the issued `Oauth20ClientInformation` or the §3.2.2 error params; a public client registers with `token_endpoint_auth_method: none` and needs no secret nor any provider console.
+
+  Together they let a client go from an unauthenticated 401 to a usable client id with zero pre-registration (fastmail implements the whole chain); Google and Microsoft publish no registration endpoint, so their console-issued client ids remain required there.
+
 - Added the optional `client_secret` field to `Oauth20AccessTokenRequestParams` and `Oauth20RefreshAccessTokenParams`, serialized into the form body when set; Google requires the secret in both exchanges for its desktop-type clients, even though such installed apps cannot keep it confidential.
 
 - Added the OAuth 2.0 Device Authorization Grant (RFC 8628) as the device_authorization_grant module, with the `Oauth20RequestDeviceAuthorization` coroutine (device and user code request) and the single-poll `Oauth20RequestDeviceAccessToken` coroutine; `Oauth20IssueAccessTokenErrorCode` gained the RFC 8628 §3.5 codes, the non-standard Microsoft Entra `authorization_declined` and `bad_verification_code` codes, plus a catch-all `Unknown` variant
