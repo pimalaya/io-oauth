@@ -99,6 +99,7 @@ fn main() {
         code: response_params.code,
         redirect_uri: Some(redirect_uri.into()),
         client_id: client_id.into(),
+        client_secret: None,
         pkce_code_verifier: None,
     };
 

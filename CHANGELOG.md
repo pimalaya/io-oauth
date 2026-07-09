@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added the RFC 8707 `invalid_target` error code (`InvalidTarget`) to `Oauth20AuthorizeErrorCode` and `Oauth20IssueAccessTokenErrorCode`, and a catch-all `Unknown` variant to `Oauth20AuthorizeErrorCode`: an unregistered code in the authorization redirect used to be silently dropped and reported as `InvalidRequest`, masking the server's actual error (fastmail answers `invalid_target` when the authorization request carries no resource parameter)
+- Changed the `Display` of the authorization error returned by `Oauth20AuthorizeParams::validate` to append the server's `error_description` after the error code when the redirect carries one, so the reason a server rejected the request is no longer dropped from the message
 - Renamed all public types with the version-scoped `Oauth20` prefix, following the io-http `Http11` convention: `RequestOauth2AccessToken` is now `Oauth20RequestAccessToken`, `RefreshOauth2AccessToken` is now `Oauth20RefreshAccessToken`, `AuthorizeParams` is now `Oauth20AuthorizeParams`, `State` is now `Oauth20State`, `PkceCodeChallenge` is now `Oauth20PkceCodeChallenge`, and so on
 - Made the crate `no_std`: `alloc`-based by default, `std` pulled by the `client` cargo feature
 - Removed the `oauth2`, `rfc6749`, `pkce` and `rfc7636` cargo features, OAuth 2.0 and PKCE support are now always compiled

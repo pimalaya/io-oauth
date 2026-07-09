@@ -264,6 +264,12 @@ pub enum Oauth20IssueAccessTokenErrorCode {
     /// Non-standard code sent by Microsoft Entra.
     BadVerificationCode,
 
+    /// The requested resource is invalid, missing, unknown, or
+    /// malformed (RFC 8707 Resource Indicators).
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc8707#section-3>
+    InvalidTarget,
+
     /// Any error code not registered above, kept for forward
     /// compatibility with provider-specific extensions.
     #[serde(other)]

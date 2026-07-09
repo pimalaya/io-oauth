@@ -2,6 +2,8 @@
 //!
 //! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2>
 
+use core::fmt;
+
 use alloc::borrow::Cow;
 
 use log::debug;
@@ -52,7 +54,7 @@ impl<'a> Oauth20AuthorizeParams<'a> {
 #[derive(Debug, ThisError)]
 pub enum Oauth20AuthorizeValidateError<'a> {
     /// The authorization server returned an error response.
-    #[error("Authorization error: {:?}", _0.error)]
+    #[error("Authorization error: {_0}")]
     Server(Oauth20AuthorizeErrorParams<'a>),
     /// A state was expected in the response but none was returned.
     #[error("Authorization state missing from response")]
@@ -181,6 +183,18 @@ pub struct Oauth20AuthorizeErrorParams<'a> {
     pub error_uri: Option<Cow<'a, Url>>,
 }
 
+impl fmt::Display for Oauth20AuthorizeErrorParams<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.error)?;
+
+        if let Some(description) = &self.error_description {
+            write!(f, ": {description}")?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Oauth20AuthorizeErrorCode {
@@ -215,4 +229,17 @@ pub enum Oauth20AuthorizeErrorCode {
     /// Unavailable HTTP status code cannot be returned to the client
     /// via an HTTP redirect.)
     TemporarilyUnavailable,
+
+    /// The requested resource is invalid, missing, unknown, or
+    /// malformed (RFC 8707 Resource Indicators). Servers requiring an
+    /// explicit `resource` parameter (fastmail) answer this when the
+    /// authorization request carries none.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc8707#section-3>
+    InvalidTarget,
+
+    /// Any error code not registered above, kept for forward
+    /// compatibility with provider-specific extensions.
+    #[serde(other)]
+    Unknown,
 }
