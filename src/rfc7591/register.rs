@@ -1,6 +1,57 @@
 //! Module dedicated to OAuth 2.0 Dynamic Client Registration.
 //!
 //! Refs: <https://datatracker.ietf.org/doc/html/rfc7591>
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use std::{
+//!     io::{Read, Write},
+//!     net::TcpStream,
+//! };
+//!
+//! use io_http::rfc9110::request::HttpRequest;
+//! use io_oauth::rfc7591::register::{
+//!     Oauth20RegisterClient, Oauth20RegisterClientParams, Oauth20RegisterClientResult,
+//! };
+//! use url::Url;
+//!
+//! let registration_url = Url::parse("https://example.com/register").unwrap();
+//! let request = HttpRequest {
+//!     method: "POST".into(),
+//!     url: registration_url.clone(),
+//!     headers: Vec::new(),
+//!     body: Vec::new(),
+//! }
+//! .header("Host", registration_url.host_str().unwrap());
+//!
+//! let params = Oauth20RegisterClientParams {
+//!     client_name: Some("My App".into()),
+//!     redirect_uris: vec!["http://127.0.0.1/redirect".into()],
+//!     token_endpoint_auth_method: Some("none".into()),
+//!     ..Default::default()
+//! };
+//!
+//! let mut stream = TcpStream::connect("example.com:443").unwrap();
+//! let mut coroutine = Oauth20RegisterClient::new(request, &params).unwrap();
+//! let mut arg: Option<&[u8]> = None;
+//! let mut buf = [0u8; 4096];
+//!
+//! let response = loop {
+//!     match coroutine.resume(arg.take()) {
+//!         Oauth20RegisterClientResult::Ok(res) => break res,
+//!         Oauth20RegisterClientResult::WantsRead => {
+//!             let n = stream.read(&mut buf).unwrap();
+//!             arg = Some(&buf[..n]);
+//!         }
+//!         Oauth20RegisterClientResult::WantsWrite(bytes) => {
+//!             stream.write_all(&bytes).unwrap();
+//!         }
+//!         Oauth20RegisterClientResult::Err(err) => panic!("{err}"),
+//!     }
+//! };
+//! # let _ = response;
+//! ```
 
 use alloc::{string::String, vec::Vec};
 
@@ -17,6 +68,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
 
+/// The registration response: client information, or error params.
+///
+/// Refs: <https://datatracker.ietf.org/doc/html/rfc7591#section-3.2>
 pub type Oauth20RegisterClientResponse =
     Result<Oauth20ClientInformation, Oauth20RegisterClientErrorParams>;
 
@@ -25,58 +79,45 @@ pub type Oauth20RegisterClientResponse =
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc7591#section-2>
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Oauth20RegisterClientParams {
-    /// The redirection URIs the client will use in authorization
-    /// requests.
+    /// The redirection URIs the client will use in authorization requests.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub redirect_uris: Vec<String>,
-
-    /// The client authentication method for the token endpoint
-    /// (`none` for a public client without secret).
+    /// The client authentication method for the token endpoint (`none` for a
+    /// public client without secret).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_endpoint_auth_method: Option<String>,
-
     /// The grant types the client will use (`authorization_code`,
     /// `refresh_token`, ...).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub grant_types: Vec<String>,
-
     /// The response types the client will use (`code`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub response_types: Vec<String>,
-
     /// Human-readable name of the client, shown on consent screens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_name: Option<String>,
-
     /// URL of the client's home page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_uri: Option<String>,
-
     /// URL of the client's logo.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logo_uri: Option<String>,
-
     /// Space-separated scope values the client will request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
-
     /// Contact addresses of people responsible for the client.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub contacts: Vec<String>,
-
     /// URL of the client's terms of service.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tos_uri: Option<String>,
-
     /// URL of the client's privacy policy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_uri: Option<String>,
-
-    /// Identifier of the client software, stable across dynamic
-    /// registrations of the same software.
+    /// Identifier of the client software, stable across dynamic registrations
+    /// of the same software.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub software_id: Option<String>,
-
     /// Version of the client software.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub software_version: Option<String>,
@@ -89,17 +130,14 @@ pub struct Oauth20RegisterClientParams {
 pub struct Oauth20ClientInformation {
     /// The issued client identifier.
     pub client_id: String,
-
     /// The issued client secret; absent for public clients.
     #[serde(default)]
     pub client_secret: Option<SecretString>,
-
     /// Unix epoch seconds when the client identifier was issued.
     #[serde(default)]
     pub client_id_issued_at: Option<u64>,
-
-    /// Unix epoch seconds when the client secret expires, 0 for
-    /// never; absent without a secret.
+    /// Unix epoch seconds when the client secret expires, 0 for never; absent
+    /// without a secret.
     #[serde(default)]
     pub client_secret_expires_at: Option<u64>,
 }
@@ -113,17 +151,16 @@ impl TryFrom<&[u8]> for Oauth20ClientInformation {
     }
 }
 
-/// The response returned by the registration endpoint when the client
-/// metadata is invalid.
+/// The response returned by the registration endpoint when the client metadata
+/// is invalid.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc7591#section-3.2.2>
 #[derive(Clone, Debug, Deserialize)]
 pub struct Oauth20RegisterClientErrorParams {
     /// A single ASCII error code.
     pub error: Oauth20RegisterClientErrorCode,
-
-    /// Human-readable ASCII text providing additional information
-    /// about the rejected registration.
+    /// Human-readable ASCII text providing additional information about the
+    /// rejected registration.
     pub error_description: Option<String>,
 }
 
@@ -142,20 +179,15 @@ impl TryFrom<&[u8]> for Oauth20RegisterClientErrorParams {
 pub enum Oauth20RegisterClientErrorCode {
     /// The value of one or more redirection URIs is invalid.
     InvalidRedirectUri,
-
-    /// The value of one of the client metadata fields is invalid and
-    /// the server has rejected this request.
+    /// The value of one of the client metadata fields is invalid and the server
+    /// has rejected this request.
     InvalidClientMetadata,
-
     /// The software statement presented is invalid.
     InvalidSoftwareStatement,
-
-    /// The software statement presented is not approved for use by
-    /// this authorization server.
+    /// The software statement presented is not approved for use by this
+    /// authorization server.
     UnapprovedSoftwareStatement,
-
-    /// A code this module does not know (servers may extend the
-    /// registry).
+    /// A code this module does not know (servers may extend the registry).
     #[serde(other)]
     Unknown,
 }
@@ -163,12 +195,20 @@ pub enum Oauth20RegisterClientErrorCode {
 /// Errors that can occur during the coroutine progression.
 #[derive(Debug, Error)]
 pub enum Oauth20RegisterClientError {
+    /// The HTTP request could not be sent.
     #[error(transparent)]
     SendHttpRegister(#[from] Http11SendError),
+    /// The HTTP response could not be parsed.
     #[error(transparent)]
     ParseHttpResponse(#[from] serde_json::Error),
+    /// The server answered with an unexpected redirection.
     #[error("Unexpected redirection {code} to {url}")]
-    Redirect { url: Url, code: u16 },
+    Redirect {
+        /// The redirection target URL.
+        url: Url,
+        /// The redirection HTTP status code.
+        code: u16,
+    },
 }
 
 /// Result returned by the coroutine's resume function.
@@ -178,8 +218,7 @@ pub enum Oauth20RegisterClientResult {
     Ok(Oauth20RegisterClientResponse),
     /// The coroutine wants the socket to be read into.
     WantsRead,
-    /// The coroutine wants the given bytes to be written to the
-    /// socket.
+    /// The coroutine wants the given bytes to be written to the socket.
     WantsWrite(Vec<u8>),
     /// The coroutine encountered an error.
     Err(Oauth20RegisterClientError),
@@ -187,11 +226,11 @@ pub enum Oauth20RegisterClientResult {
 
 /// The I/O-free coroutine to register a client dynamically.
 ///
-/// This coroutine sends the client metadata to the registration
-/// endpoint (advertised by the RFC 8414 server metadata) and receives
-/// either the issued client information or an error response. A
-/// public client registers with `token_endpoint_auth_method: none`
-/// and needs no secret nor any provider console.
+/// This coroutine sends the client metadata to the registration endpoint
+/// (advertised by the RFC 8414 server metadata) and receives either the issued
+/// client information or an error response. A public client registers with
+/// `token_endpoint_auth_method: none` and needs no secret nor any provider
+/// console.
 pub struct Oauth20RegisterClient {
     send: Http11Send,
 }
@@ -250,7 +289,7 @@ impl Oauth20RegisterClient {
 mod tests {
     use alloc::{string::String, vec};
 
-    use crate::v2_0::rfc7591::client_registration::{
+    use crate::rfc7591::register::{
         Oauth20ClientInformation, Oauth20RegisterClientErrorCode, Oauth20RegisterClientErrorParams,
         Oauth20RegisterClientParams,
     };

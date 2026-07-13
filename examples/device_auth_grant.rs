@@ -3,10 +3,7 @@ use std::{
     io::{Write, stdin, stdout},
 };
 
-use io_oauth::v2_0::{
-    client::Oauth20ClientStd,
-    device_authorization_grant::device_authorization_request::Oauth20DeviceAuthorizationRequestParams,
-};
+use io_oauth::{rfc6749::client::Oauth20ClientStd, rfc8628::auth::Oauth20RequestDeviceAuthParams};
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
 use url::Url;
@@ -39,7 +36,7 @@ fn main() {
 
     // 1. device authorization request: obtain device and user codes
 
-    let params = Oauth20DeviceAuthorizationRequestParams {
+    let params = Oauth20RequestDeviceAuthParams {
         client_id: client_id.as_str().into(),
         scope: scope.split_whitespace().map(Into::into).collect(),
     };

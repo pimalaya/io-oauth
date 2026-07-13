@@ -8,12 +8,12 @@ use std::{
 };
 
 use io_http::rfc9110::request::HttpRequest;
-use io_oauth::v2_0::authorization_code_grant::{
+use io_oauth::rfc6749::{
     access_token_request::{
-        Oauth20AccessTokenRequestParams, Oauth20RequestAccessToken, Oauth20RequestAccessTokenResult,
+        Oauth20RequestAccessToken, Oauth20RequestAccessTokenParams, Oauth20RequestAccessTokenResult,
     },
-    authorization_request::Oauth20AuthorizationRequestParams,
-    authorization_response::Oauth20AuthorizeParams,
+    auth_request::Oauth20AuthRequestParams,
+    auth_response::Oauth20AuthParams,
     state::Oauth20State,
 };
 use rustls::{ClientConfig, ClientConnection, StreamOwned};
@@ -54,7 +54,7 @@ fn main() {
     // 1. authorization request: build URL for user to browse
 
     let state = Oauth20State::default();
-    let auth_uri = Oauth20AuthorizationRequestParams {
+    let auth_uri = Oauth20AuthRequestParams {
         client_id: client_id.as_str().into(),
         redirect_uri: Some(redirect_uri.clone().into()),
         scope: scope.split_whitespace().map(Into::into).collect(),
@@ -73,9 +73,9 @@ fn main() {
     let redirected_uri: Url = read_line("Redirected URI?").parse().unwrap();
     println!();
 
-    let response_params = Oauth20AuthorizeParams::from(&redirected_uri);
+    let response_params = Oauth20AuthParams::from(&redirected_uri);
 
-    let Oauth20AuthorizeParams::Success(response_params) = response_params else {
+    let Oauth20AuthParams::Success(response_params) = response_params else {
         panic!("invalid response params");
     };
 
@@ -95,7 +95,7 @@ fn main() {
     }
     .header("Host", format!("{host}:{port}"));
 
-    let params = Oauth20AccessTokenRequestParams {
+    let params = Oauth20RequestAccessTokenParams {
         code: response_params.code,
         redirect_uri: Some(redirect_uri.into()),
         client_id: client_id.into(),

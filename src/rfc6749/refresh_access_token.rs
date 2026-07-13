@@ -1,6 +1,53 @@
 //! Module dedicated to the section 6: Refreshing an Access Token.
 //!
 //! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-6>
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use std::{
+//!     io::{Read, Write},
+//!     net::TcpStream,
+//! };
+//!
+//! use io_http::rfc9110::request::HttpRequest;
+//! use io_oauth::rfc6749::refresh_access_token::{
+//!     Oauth20RefreshAccessToken, Oauth20RefreshAccessTokenParams,
+//!     Oauth20RefreshAccessTokenResult,
+//! };
+//! use url::Url;
+//!
+//! let token_url = Url::parse("https://example.com/token").unwrap();
+//! let request = HttpRequest {
+//!     method: "POST".into(),
+//!     url: token_url.clone(),
+//!     headers: Vec::new(),
+//!     body: Vec::new(),
+//! }
+//! .header("Host", token_url.host_str().unwrap());
+//!
+//! let params = Oauth20RefreshAccessTokenParams::new("client-id", "the-refresh-token");
+//!
+//! let mut stream = TcpStream::connect("example.com:443").unwrap();
+//! let mut coroutine = Oauth20RefreshAccessToken::new(request, params);
+//! let mut arg: Option<&[u8]> = None;
+//! let mut buf = [0u8; 4096];
+//!
+//! let response = loop {
+//!     match coroutine.resume(arg.take()) {
+//!         Oauth20RefreshAccessTokenResult::Ok(res) => break res,
+//!         Oauth20RefreshAccessTokenResult::WantsRead => {
+//!             let n = stream.read(&mut buf).unwrap();
+//!             arg = Some(&buf[..n]);
+//!         }
+//!         Oauth20RefreshAccessTokenResult::WantsWrite(bytes) => {
+//!             stream.write_all(&bytes).unwrap();
+//!         }
+//!         Oauth20RefreshAccessTokenResult::Err(err) => panic!("{err}"),
+//!     }
+//! };
+//! # let _ = response;
+//! ```
 
 use core::fmt;
 
@@ -23,7 +70,7 @@ use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use url::{Url, form_urlencoded::Serializer};
 
-use crate::v2_0::issue_access_token::{
+use crate::rfc6749::issue_access_token::{
     Oauth20AccessTokenResponse, Oauth20IssueAccessTokenErrorParams,
     Oauth20IssueAccessTokenSuccessParams, parse_http_date,
 };
@@ -31,12 +78,20 @@ use crate::v2_0::issue_access_token::{
 /// Errors that can occur during the coroutine progression.
 #[derive(Debug, Error)]
 pub enum Oauth20RefreshAccessTokenError {
+    /// The HTTP request could not be sent.
     #[error(transparent)]
     SendHttpRefresh(#[from] Http11SendError),
+    /// The HTTP response could not be parsed.
     #[error(transparent)]
     ParseHttpResponse(#[from] serde_json::Error),
+    /// The server answered with an unexpected redirection.
     #[error("Unexpected redirection {code} to {url}")]
-    Redirect { url: Url, code: u16 },
+    Redirect {
+        /// The redirection target URL.
+        url: Url,
+        /// The redirection HTTP status code.
+        code: u16,
+    },
 }
 
 /// Result returned by the coroutine's resume function.
@@ -46,8 +101,7 @@ pub enum Oauth20RefreshAccessTokenResult {
     Ok(Oauth20AccessTokenResponse),
     /// The coroutine wants the socket to be read into.
     WantsRead,
-    /// The coroutine wants the given bytes to be written to the
-    /// socket.
+    /// The coroutine wants the given bytes to be written to the socket.
     WantsWrite(Vec<u8>),
     /// The coroutine encountered an error.
     Err(Oauth20RefreshAccessTokenError),
@@ -55,11 +109,7 @@ pub enum Oauth20RefreshAccessTokenResult {
 
 /// The I/O-free coroutine to refresh an access token.
 ///
-/// This coroutine sends the refresh access token HTTP request to the
-/// token endpoint and receives either a successful or an error HTTP
-/// response.
-///
-/// Refs: [`Oauth20AccessTokenResponse`]
+/// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-6>
 pub struct Oauth20RefreshAccessToken {
     send: Http11Send,
 }
@@ -117,25 +167,27 @@ impl Oauth20RefreshAccessToken {
 
 /// The refresh access token request parameters.
 ///
-/// If the authorization server issued a refresh token to the client,
-/// the client makes a refresh request to the token endpoint by adding
-/// the following parameters using the
-/// "application/x-www-form-urlencoded" format with a character
-/// encoding of UTF-8 in the HTTP request entity-body.
-///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-6>
 #[derive(Debug)]
 pub struct Oauth20RefreshAccessTokenParams<'a> {
+    /// The client identifier.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-2.2>
     pub client_id: String,
-    /// Secret issued alongside the client id, when the server requires
-    /// it in the exchange (Google does for its desktop-type clients,
-    /// even though such installed apps cannot keep it confidential).
+    /// The client secret, for confidential clients.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-2.3.1>
     pub client_secret: Option<SecretString>,
+    /// The refresh token issued with the original grant.
     pub refresh_token: SecretString,
+    /// The requested scope, narrowing the original one at most.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-3.3>
     pub scopes: BTreeSet<Cow<'a, str>>,
 }
 
 impl<'a> Oauth20RefreshAccessTokenParams<'a> {
+    /// Builds params from a client id and refresh token, no secret nor scope.
     pub fn new(client_id: impl ToString, refresh_token: impl Into<SecretString>) -> Self {
         Self {
             client_id: client_id.to_string(),
@@ -145,6 +197,7 @@ impl<'a> Oauth20RefreshAccessTokenParams<'a> {
         }
     }
 
+    /// Serializes the params into the form-urlencoded request body.
     pub fn to_serializer(&self) -> Serializer<'a, String> {
         let mut serializer = Serializer::new(String::new());
 

@@ -26,15 +26,20 @@ const UNRESERVED: [u8; 66] = [
     b'_', b'~',
 ];
 
+/// The PKCE code challenge sent on the authorization request.
+///
+/// Refs: <https://datatracker.ietf.org/doc/html/rfc7636#section-4.2>
 #[cfg_attr(feature = "client", derive(Default))]
 #[derive(Clone, Debug)]
 pub struct Oauth20PkceCodeChallenge {
+    /// The transformation applied to the verifier.
     pub method: Oauth20PkceCodeChallengeMethod,
+    /// The code verifier the challenge is derived from.
     pub verifier: Oauth20PkceCodeVerifier,
 }
 
 impl Oauth20PkceCodeChallenge {
-    /// Returns a base64-encoded version of the PKCE code challenge.
+    /// Returns the challenge encoded per its method (base64url for `S256`).
     pub fn encode(&self) -> Cow<'_, str> {
         match self.method {
             Oauth20PkceCodeChallengeMethod::Plain => {
@@ -49,9 +54,14 @@ impl Oauth20PkceCodeChallenge {
     }
 }
 
+/// The transformation from code verifier to code challenge.
+///
+/// Refs: <https://datatracker.ietf.org/doc/html/rfc7636#section-4.2>
 #[derive(Clone, Debug, Default)]
 pub enum Oauth20PkceCodeChallengeMethod {
+    /// The challenge is the verifier verbatim.
     Plain,
+    /// The challenge is the base64url-encoded SHA-256 of the verifier.
     #[default]
     Sha256,
 }
@@ -60,6 +70,7 @@ impl Oauth20PkceCodeChallengeMethod {
     const PLAIN: &'static str = "plain";
     const SHA256: &'static str = "S256";
 
+    /// Returns the method's wire value (`plain` or `S256`).
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Plain => Self::PLAIN,
@@ -68,10 +79,14 @@ impl Oauth20PkceCodeChallengeMethod {
     }
 }
 
+/// The high-entropy secret the code challenge is derived from.
+///
+/// Refs: <https://datatracker.ietf.org/doc/html/rfc7636#section-4.1>
 #[derive(Clone, Debug)]
 pub struct Oauth20PkceCodeVerifier(SecretBox<[u8]>);
 
 impl Oauth20PkceCodeVerifier {
+    /// Generates a random verifier of `size` unreserved bytes (clamped 43-128).
     #[cfg(feature = "client")]
     pub fn new(size: u8) -> Self {
         // NOTE: code-verifier = 43*128unreserved

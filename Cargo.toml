@@ -1,7 +1,7 @@
 [package]
 name = "io-oauth"
-description = "Set of I/O-free coroutines to manage OAuth flows"
-version = "0.0.4"
+description = "OAuth client library"
+version = "0.1.0"
 authors = ["soywod <clement.douin@posteo.net>"]
 rust-version = "1.88"
 edition = "2024"
@@ -17,21 +17,21 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = []
-client = ["dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pimalaya-stream/std", "dep:rand", "rand/thread_rng"]
-native-tls = ["client", "pimalaya-stream/native-tls", "io-http/native-tls"]
-rustls-aws = ["client", "pimalaya-stream/rustls-aws", "io-http/rustls-aws"]
-rustls-ring = ["client", "pimalaya-stream/rustls-ring", "io-http/rustls-ring"]
+default = ["rustls-ring"]
+client = ["dep:rand", "rand/thread_rng"]
+native-tls = ["client", "dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pimalaya-stream/std", "pimalaya-stream/native-tls", "io-http/native-tls"]
+rustls-aws = ["client", "dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pimalaya-stream/std", "pimalaya-stream/rustls-aws", "io-http/rustls-aws"]
+rustls-ring = ["client", "dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pimalaya-stream/std", "pimalaya-stream/rustls-ring", "io-http/rustls-ring"]
 vendored = ["pimalaya-stream?/vendored", "io-http/vendored"]
 
 [[example]]
-name = "authorization-code-grant"
-path = "examples/authorization_code_grant.rs"
+name = "auth-code-grant"
+path = "examples/auth_code_grant.rs"
 required-features = ["client"]
 
 [[example]]
-name = "device-authorization-grant"
-path = "examples/device_authorization_grant.rs"
+name = "device-auth-grant"
+path = "examples/device_auth_grant.rs"
 required-features = ["rustls-ring"]
 
 [dev-dependencies]
@@ -42,7 +42,7 @@ rustls-platform-verifier = "0.7"
 [dependencies]
 anyhow = { version = "1", default-features = false, optional = true }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
-io-http = { version = "0.1", default-features = false }
+io-http = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
 pimalaya-stream = { version = "0.0.1", default-features = false, optional = true }
 rand = { version = "0.10", default-features = false, optional = true }
@@ -52,6 +52,3 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false, features = ["zeroize"] }
 thiserror = { version = "2", default-features = false }
 url = { version = "2.5", default-features = false, features = ["serde"] }
-
-[patch.crates-io]
-io-http.git = "https://github.com/pimalaya/io-http"

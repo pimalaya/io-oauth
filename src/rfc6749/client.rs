@@ -1,13 +1,8 @@
 //! Std-blocking OAuth 2.0 client wrapping a single boxed stream.
 //!
-//! Two construction paths:
-//! - [`Oauth20ClientStd::new`] wraps any pre-connected
-//!   `Read + Write + Send` stream. Callers own connection setup
-//!   (TCP, TLS, etc.).
-//! - [`Oauth20ClientStd::connect`] (TLS-gated) opens the TCP/TLS stream
-//!   itself via [`pimalaya_stream::std::stream::StreamStd`].
-//!
-//! Per-operation methods inline the coroutine loop against the
+//! [`Oauth20ClientStd::new`] wraps any pre-connected `Read + Write + Send`
+//! stream, while the TLS-gated [`Oauth20ClientStd::connect`] opens the TCP/TLS
+//! stream itself. Per-operation methods inline the coroutine loop against the
 //! client's stream.
 
 use alloc::{
@@ -16,6 +11,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+
 use std::{
     io::{self, BufRead, BufReader, Read, Write},
     net::{Shutdown, TcpListener},
@@ -41,36 +37,41 @@ use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use url::Url;
 
-use crate::v2_0::{
-    authorization_code_grant::access_token_request::{
-        Oauth20AccessTokenRequestParams, Oauth20RequestAccessToken, Oauth20RequestAccessTokenError,
-        Oauth20RequestAccessTokenResult,
-    },
-    device_authorization_grant::{
-        device_access_token_request::{
-            Oauth20DeviceAccessTokenRequestParams, Oauth20RequestDeviceAccessToken,
-            Oauth20RequestDeviceAccessTokenError, Oauth20RequestDeviceAccessTokenResult,
-        },
-        device_authorization_request::{
-            Oauth20DeviceAuthorizationRequestParams, Oauth20DeviceAuthorizationResponse,
-            Oauth20RequestDeviceAuthorization, Oauth20RequestDeviceAuthorizationError,
-            Oauth20RequestDeviceAuthorizationResult,
-        },
-    },
-    issue_access_token::Oauth20AccessTokenResponse,
-    refresh_access_token::{
-        Oauth20RefreshAccessToken, Oauth20RefreshAccessTokenError, Oauth20RefreshAccessTokenParams,
-        Oauth20RefreshAccessTokenResult,
-    },
-};
 #[cfg(any(
     feature = "rustls-aws",
     feature = "rustls-ring",
     feature = "native-tls"
 ))]
-use crate::v2_0::{
-    device_authorization_grant::device_authorization_request::Oauth20DeviceAuthorizationSuccessParams,
-    issue_access_token::Oauth20IssueAccessTokenErrorCode,
+use crate::{
+    rfc6749::issue_access_token::Oauth20IssueAccessTokenErrorCode,
+    rfc8628::auth::Oauth20DeviceAuthSuccessParams,
+};
+use crate::{
+    rfc6749::{
+        access_token_request::{
+            Oauth20RequestAccessToken, Oauth20RequestAccessTokenError,
+            Oauth20RequestAccessTokenParams, Oauth20RequestAccessTokenResult,
+        },
+        client_credentials::{
+            Oauth20RequestClientCredentials, Oauth20RequestClientCredentialsError,
+            Oauth20RequestClientCredentialsParams, Oauth20RequestClientCredentialsResult,
+        },
+        issue_access_token::Oauth20AccessTokenResponse,
+        refresh_access_token::{
+            Oauth20RefreshAccessToken, Oauth20RefreshAccessTokenError,
+            Oauth20RefreshAccessTokenParams, Oauth20RefreshAccessTokenResult,
+        },
+    },
+    rfc8628::{
+        auth::{
+            Oauth20DeviceAuthResponse, Oauth20RequestDeviceAuth, Oauth20RequestDeviceAuthError,
+            Oauth20RequestDeviceAuthParams, Oauth20RequestDeviceAuthResult,
+        },
+        token::{
+            Oauth20RequestDeviceAccessToken, Oauth20RequestDeviceAccessTokenError,
+            Oauth20RequestDeviceAccessTokenParams, Oauth20RequestDeviceAccessTokenResult,
+        },
+    },
 };
 
 const READ_BUFFER_SIZE: usize = 8 * 1024;
@@ -78,20 +79,28 @@ const READ_BUFFER_SIZE: usize = 8 * 1024;
 /// Errors returned by [`Oauth20ClientStd`].
 #[derive(Debug, Error)]
 pub enum Oauth20ClientStdError {
+    /// The underlying stream I/O failed.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// The authorization code exchange failed.
     #[error(transparent)]
     RequestAccessToken(#[from] Oauth20RequestAccessTokenError),
+    /// The token refresh failed.
     #[error(transparent)]
     RefreshAccessToken(#[from] Oauth20RefreshAccessTokenError),
+    /// The client credentials exchange failed.
     #[error(transparent)]
-    RequestDeviceAuthorization(#[from] Oauth20RequestDeviceAuthorizationError),
+    RequestClientCredentials(#[from] Oauth20RequestClientCredentialsError),
+    /// The device authorization request failed.
+    #[error(transparent)]
+    RequestDeviceAuth(#[from] Oauth20RequestDeviceAuthError),
+    /// A device access token poll failed.
     #[error(transparent)]
     RequestDeviceAccessToken(#[from] Oauth20RequestDeviceAccessTokenError),
-
+    /// The device code expired before the user completed the flow.
     #[error("OAuth 2.0 device code expired before the user completed authorization")]
     DeviceCodeExpired,
-
+    /// Opening the TCP/TLS connection failed.
     #[cfg(any(
         feature = "rustls-aws",
         feature = "rustls-ring",
@@ -99,28 +108,29 @@ pub enum Oauth20ClientStdError {
     ))]
     #[error(transparent)]
     Tls(#[from] anyhow::Error),
-
+    /// The endpoint URL has no host.
     #[error("OAuth 2.0 URL `{0}` has no host")]
     UrlMissingHost(String),
+    /// The endpoint URL has no port and no known default.
     #[error("OAuth 2.0 URL `{0}` has no port")]
     UrlMissingPort(String),
+    /// The endpoint URL scheme is neither `http` nor `https`.
     #[error("OAuth 2.0 URL `{0}` has unsupported scheme `{1}` (expected `http` or `https`)")]
     UrlUnsupportedScheme(String, String),
-
+    /// The redirect server received a malformed HTTP request.
     #[error("Malformed HTTP request received on redirect server: `{0}`")]
     InvalidRedirectRequest(String),
 }
 
-/// Marker trait for streams the client wraps; implemented for any
-/// blocking `Read + Write + Send` stream.
-pub trait Oauth20Stream: Read + Write + Send {}
-impl<T: Read + Write + Send + ?Sized> Oauth20Stream for T {}
-
 /// Std-blocking OAuth 2.0 client wrapping a single boxed stream.
 pub struct Oauth20ClientStd {
+    /// The connected stream to the token endpoint.
     pub stream: Box<dyn Oauth20Stream>,
+    /// The token endpoint the client issues requests against.
     pub token_endpoint: Url,
+    /// The client identifier.
     pub client_id: String,
+    /// The client secret, for confidential clients.
     pub client_secret: Option<SecretString>,
 }
 
@@ -140,8 +150,9 @@ impl Oauth20ClientStd {
         }
     }
 
-    /// Opens a TLS-aware connection to `token_endpoint` and returns
-    /// a client ready to issue requests against it.
+    /// Opens a TLS-aware connection to `token_endpoint` and returns a
+    /// client ready to issue requests against it. `http://` is plain
+    /// TCP, `https://` is implicit TLS.
     #[cfg(any(
         feature = "rustls-aws",
         feature = "rustls-ring",
@@ -152,37 +163,27 @@ impl Oauth20ClientStd {
         tls: &Tls,
         client_id: impl Into<String>,
     ) -> Result<Self, Oauth20ClientStdError> {
-        let stream = Self::open_stream(&token_endpoint, tls)?;
-        Ok(Self::new(stream, token_endpoint, client_id))
-    }
-
-    /// Opens a TCP or TLS stream to the given endpoint, depending on
-    /// its scheme.
-    #[cfg(any(
-        feature = "rustls-aws",
-        feature = "rustls-ring",
-        feature = "native-tls"
-    ))]
-    fn open_stream(endpoint: &Url, tls: &Tls) -> Result<StreamStd, Oauth20ClientStdError> {
-        let host = endpoint
+        let host = token_endpoint
             .host_str()
-            .ok_or_else(|| Oauth20ClientStdError::UrlMissingHost(endpoint.to_string()))?;
-        let port = endpoint
+            .ok_or_else(|| Oauth20ClientStdError::UrlMissingHost(token_endpoint.to_string()))?;
+        let port = token_endpoint
             .port_or_known_default()
-            .ok_or_else(|| Oauth20ClientStdError::UrlMissingPort(endpoint.to_string()))?;
+            .ok_or_else(|| Oauth20ClientStdError::UrlMissingPort(token_endpoint.to_string()))?;
 
-        match endpoint.scheme() {
+        let stream = match token_endpoint.scheme() {
             scheme if scheme.eq_ignore_ascii_case("https") => {
-                Ok(StreamStd::connect_tls(host, port, tls)?)
+                StreamStd::connect_tls(host, port, tls)?
             }
-            scheme if scheme.eq_ignore_ascii_case("http") => {
-                Ok(StreamStd::connect_tcp(host, port)?)
+            scheme if scheme.eq_ignore_ascii_case("http") => StreamStd::connect_tcp(host, port)?,
+            scheme => {
+                return Err(Oauth20ClientStdError::UrlUnsupportedScheme(
+                    token_endpoint.to_string(),
+                    scheme.to_string(),
+                ));
             }
-            scheme => Err(Oauth20ClientStdError::UrlUnsupportedScheme(
-                endpoint.to_string(),
-                scheme.to_string(),
-            )),
-        }
+        };
+
+        Ok(Self::new(stream, token_endpoint, client_id))
     }
 
     /// Replaces the underlying stream.
@@ -193,7 +194,7 @@ impl Oauth20ClientStd {
     /// Exchanges an authorization code for an access token.
     pub fn request_access_token(
         &mut self,
-        params: Oauth20AccessTokenRequestParams<'_>,
+        params: Oauth20RequestAccessTokenParams<'_>,
     ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
         let request = self.build_post_request(&self.token_endpoint);
         let mut coroutine = Oauth20RequestAccessToken::new(request, params);
@@ -240,30 +241,59 @@ impl Oauth20ClientStd {
         }
     }
 
-    /// Requests a device and user code pair from the device
-    /// authorization endpoint, which usually shares its host with the
-    /// token endpoint the client's stream is connected to.
-    pub fn request_device_authorization(
+    /// Requests an access token with the client credentials grant.
+    ///
+    /// The client authenticates with its own credentials (the Basic
+    /// `Authorization` header set from `client_secret`) and receives a
+    /// token scoped to resources under its own control. No refresh
+    /// token is issued; the caller repeats the request on expiry.
+    pub fn request_client_credentials(
         &mut self,
-        endpoint: &Url,
-        params: Oauth20DeviceAuthorizationRequestParams<'_>,
-    ) -> Result<Oauth20DeviceAuthorizationResponse, Oauth20ClientStdError> {
-        let request = self.build_post_request(endpoint);
-        let mut coroutine = Oauth20RequestDeviceAuthorization::new(request, params);
+        params: Oauth20RequestClientCredentialsParams<'_>,
+    ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
+        let request = self.build_post_request(&self.token_endpoint);
+        let mut coroutine = Oauth20RequestClientCredentials::new(request, params);
         let mut buf = [0u8; READ_BUFFER_SIZE];
         let mut arg: Option<&[u8]> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                Oauth20RequestDeviceAuthorizationResult::Ok(res) => return Ok(res),
-                Oauth20RequestDeviceAuthorizationResult::WantsRead => {
+                Oauth20RequestClientCredentialsResult::Ok(res) => return Ok(res),
+                Oauth20RequestClientCredentialsResult::WantsRead => {
                     let n = self.stream.read(&mut buf)?;
                     arg = Some(&buf[..n]);
                 }
-                Oauth20RequestDeviceAuthorizationResult::WantsWrite(bytes) => {
+                Oauth20RequestClientCredentialsResult::WantsWrite(bytes) => {
                     self.stream.write_all(&bytes)?;
                 }
-                Oauth20RequestDeviceAuthorizationResult::Err(err) => return Err(err.into()),
+                Oauth20RequestClientCredentialsResult::Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    /// Requests a device and user code pair from the device authorization
+    /// endpoint (usually the token endpoint's host).
+    pub fn request_device_authorization(
+        &mut self,
+        endpoint: &Url,
+        params: Oauth20RequestDeviceAuthParams<'_>,
+    ) -> Result<Oauth20DeviceAuthResponse, Oauth20ClientStdError> {
+        let request = self.build_post_request(endpoint);
+        let mut coroutine = Oauth20RequestDeviceAuth::new(request, params);
+        let mut buf = [0u8; READ_BUFFER_SIZE];
+        let mut arg: Option<&[u8]> = None;
+
+        loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20RequestDeviceAuthResult::Ok(res) => return Ok(res),
+                Oauth20RequestDeviceAuthResult::WantsRead => {
+                    let n = self.stream.read(&mut buf)?;
+                    arg = Some(&buf[..n]);
+                }
+                Oauth20RequestDeviceAuthResult::WantsWrite(bytes) => {
+                    self.stream.write_all(&bytes)?;
+                }
+                Oauth20RequestDeviceAuthResult::Err(err) => return Err(err.into()),
             }
         }
     }
@@ -276,7 +306,7 @@ impl Oauth20ClientStd {
     /// over a fresh stream (see [`Self::await_device_access_token`]).
     pub fn request_device_access_token(
         &mut self,
-        params: Oauth20DeviceAccessTokenRequestParams<'_>,
+        params: Oauth20RequestDeviceAccessTokenParams<'_>,
     ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
         let request = self.build_post_request(&self.token_endpoint);
         let mut coroutine = Oauth20RequestDeviceAccessToken::new(request, params);
@@ -298,18 +328,13 @@ impl Oauth20ClientStd {
         }
     }
 
-    /// Polls the token endpoint until the end user completes (or
-    /// denies) the device authorization, then returns the token
-    /// response.
+    /// Polls the token endpoint until the end user completes or denies the
+    /// device authorization, then returns the token response.
     ///
-    /// The caller displays the user code and verification URI from
-    /// `device` before calling this method, which then blocks: it
-    /// sleeps the polling interval between attempts (increased by 5
-    /// seconds on "slow_down" as required by RFC 8628 §3.5),
-    /// reconnects the stream for every attempt since authorization
-    /// servers rarely keep it alive across intervals, and gives up
-    /// with [`Oauth20ClientStdError::DeviceCodeExpired`] once the
-    /// device code lifetime is exceeded.
+    /// Blocks: it sleeps the polling interval between attempts (increased by 5s
+    /// on `slow_down`), reconnects each attempt since servers rarely keep the
+    /// socket alive, and gives up with
+    /// [`Oauth20ClientStdError::DeviceCodeExpired`] past the code lifetime.
     #[cfg(any(
         feature = "rustls-aws",
         feature = "rustls-ring",
@@ -318,7 +343,7 @@ impl Oauth20ClientStd {
     pub fn await_device_access_token(
         &mut self,
         tls: &Tls,
-        device: &Oauth20DeviceAuthorizationSuccessParams,
+        device: &Oauth20DeviceAuthSuccessParams,
     ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
         let deadline = Instant::now() + Duration::from_secs(device.expires_in as u64);
         let mut interval = Duration::from_secs(device.interval as u64);
@@ -330,10 +355,13 @@ impl Oauth20ClientStd {
                 return Err(Oauth20ClientStdError::DeviceCodeExpired);
             }
 
-            let stream = Self::open_stream(&self.token_endpoint, tls)?;
-            self.stream = Box::new(stream);
+            // NOTE: authorization servers rarely keep the socket alive
+            // between polls, so reopen a fresh connection each attempt
+            // (keeping our own client_secret).
+            self.stream =
+                Self::connect(self.token_endpoint.clone(), tls, self.client_id.clone())?.stream;
 
-            let params = Oauth20DeviceAccessTokenRequestParams {
+            let params = Oauth20RequestDeviceAccessTokenParams {
                 client_id: self.client_id.clone().into(),
                 device_code: device.device_code.clone(),
             };
@@ -372,14 +400,17 @@ impl Oauth20ClientStd {
     }
 }
 
-/// Binds a local TCP listener on `redirect_uri`, waits for the
-/// authorization server's redirect, sends a `200 OK` placeholder
-/// response, and returns the redirected URL (carrying `code` and
-/// `state`).
+/// Marker trait for streams the client wraps; implemented for any
+/// blocking `Read + Write + Send` stream.
+pub trait Oauth20Stream: Read + Write + Send {}
+impl<T: Read + Write + Send + ?Sized> Oauth20Stream for T {}
+
+/// Waits on a local TCP listener for the authorization redirect and returns
+/// the redirected URL (carrying `code` and `state`).
 ///
-/// Single-shot: the listener closes once one redirect is handled.
-/// PKCE verifier and original state are tracked by the caller (this
-/// fn only forwards the URL).
+/// Single-shot: the listener closes once one redirect is handled, answering a
+/// `200 OK` placeholder. The PKCE verifier and original state are the caller's
+/// to track.
 pub fn await_redirect(redirect_uri: &Url) -> Result<Url, Oauth20ClientStdError> {
     let scheme = redirect_uri.scheme();
     let host = redirect_uri

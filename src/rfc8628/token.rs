@@ -2,6 +2,59 @@
 //! Request and Response.
 //!
 //! Refs: <https://datatracker.ietf.org/doc/html/rfc8628#section-3.4>
+//!
+//! # Example
+//!
+//! One coroutine performs one poll; the caller waits the interval and retries
+//! with a fresh coroutine while the response carries `authorization_pending`.
+//!
+//! ```rust,no_run
+//! use std::{
+//!     io::{Read, Write},
+//!     net::TcpStream,
+//! };
+//!
+//! use io_http::rfc9110::request::HttpRequest;
+//! use io_oauth::rfc8628::token::{
+//!     Oauth20RequestDeviceAccessToken, Oauth20RequestDeviceAccessTokenParams,
+//!     Oauth20RequestDeviceAccessTokenResult,
+//! };
+//! use url::Url;
+//!
+//! let token_url = Url::parse("https://example.com/token").unwrap();
+//! let request = HttpRequest {
+//!     method: "POST".into(),
+//!     url: token_url.clone(),
+//!     headers: Vec::new(),
+//!     body: Vec::new(),
+//! }
+//! .header("Host", token_url.host_str().unwrap());
+//!
+//! let params = Oauth20RequestDeviceAccessTokenParams {
+//!     client_id: "client-id".into(),
+//!     device_code: "the-device-code".into(),
+//! };
+//!
+//! let mut stream = TcpStream::connect("example.com:443").unwrap();
+//! let mut coroutine = Oauth20RequestDeviceAccessToken::new(request, params);
+//! let mut arg: Option<&[u8]> = None;
+//! let mut buf = [0u8; 4096];
+//!
+//! let response = loop {
+//!     match coroutine.resume(arg.take()) {
+//!         Oauth20RequestDeviceAccessTokenResult::Ok(res) => break res,
+//!         Oauth20RequestDeviceAccessTokenResult::WantsRead => {
+//!             let n = stream.read(&mut buf).unwrap();
+//!             arg = Some(&buf[..n]);
+//!         }
+//!         Oauth20RequestDeviceAccessTokenResult::WantsWrite(bytes) => {
+//!             stream.write_all(&bytes).unwrap();
+//!         }
+//!         Oauth20RequestDeviceAccessTokenResult::Err(err) => panic!("{err}"),
+//!     }
+//! };
+//! # let _ = response;
+//! ```
 
 use core::fmt;
 
@@ -23,7 +76,7 @@ use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use url::{Url, form_urlencoded::Serializer};
 
-use crate::v2_0::issue_access_token::{
+use crate::rfc6749::issue_access_token::{
     Oauth20AccessTokenResponse, Oauth20IssueAccessTokenErrorParams,
     Oauth20IssueAccessTokenSuccessParams, parse_http_date,
 };
@@ -31,12 +84,20 @@ use crate::v2_0::issue_access_token::{
 /// Errors that can occur during the coroutine progression.
 #[derive(Debug, Error)]
 pub enum Oauth20RequestDeviceAccessTokenError {
+    /// The HTTP request could not be sent.
     #[error(transparent)]
     SendHttpRequest(#[from] Http11SendError),
+    /// The HTTP response could not be parsed.
     #[error(transparent)]
     ParseHttpResponse(#[from] serde_json::Error),
+    /// The server answered with an unexpected redirection.
     #[error("Unexpected redirection {code} to {url}")]
-    Redirect { url: Url, code: u16 },
+    Redirect {
+        /// The redirection target URL.
+        url: Url,
+        /// The redirection HTTP status code.
+        code: u16,
+    },
 }
 
 /// Result returned by the coroutine's resume function.
@@ -53,15 +114,11 @@ pub enum Oauth20RequestDeviceAccessTokenResult {
     Err(Oauth20RequestDeviceAccessTokenError),
 }
 
-/// The I/O-free coroutine to poll the token endpoint with a device
-/// code.
+/// The I/O-free coroutine for one device-code poll of the token endpoint.
 ///
-/// One coroutine performs one poll attempt: a pending authorization
-/// surfaces as a successful HTTP exchange whose error params carry
-/// the "authorization_pending" (or "slow_down") code. The caller
-/// waits the polling interval, then retries with a fresh coroutine;
-/// servers rarely keep the connection alive between attempts, so the
-/// caller usually reconnects too.
+/// A pending authorization surfaces as a successful exchange whose error code
+/// is `authorization_pending` (or `slow_down`); the caller waits the interval,
+/// then retries with a fresh coroutine (usually over a fresh connection).
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc8628#section-3.4>
 pub struct Oauth20RequestDeviceAccessToken {
@@ -69,9 +126,8 @@ pub struct Oauth20RequestDeviceAccessToken {
 }
 
 impl Oauth20RequestDeviceAccessToken {
-    /// Creates a new I/O-free coroutine to poll the token endpoint
-    /// with a device code.
-    pub fn new(request: HttpRequest, body: Oauth20DeviceAccessTokenRequestParams<'_>) -> Self {
+    /// Creates the coroutine for one device-code poll.
+    pub fn new(request: HttpRequest, body: Oauth20RequestDeviceAccessTokenParams<'_>) -> Self {
         let request = request
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body.to_string().into_bytes());
@@ -124,20 +180,19 @@ impl Oauth20RequestDeviceAccessToken {
 
 /// The device access token request parameters.
 ///
-/// While the end user authorizes (or denies) the request at the
-/// verification URI, the client polls the token endpoint by adding
-/// the following parameters using the
-/// "application/x-www-form-urlencoded" format in the HTTP request
-/// entity-body.
-///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc8628#section-3.4>
 #[derive(Debug)]
-pub struct Oauth20DeviceAccessTokenRequestParams<'a> {
+pub struct Oauth20RequestDeviceAccessTokenParams<'a> {
+    /// The client identifier.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-2.2>
     pub client_id: Cow<'a, str>,
+    /// The device code obtained from the device authorization response.
     pub device_code: SecretString,
 }
 
-impl<'a> Oauth20DeviceAccessTokenRequestParams<'a> {
+impl<'a> Oauth20RequestDeviceAccessTokenParams<'a> {
+    /// Serializes the params into the form-urlencoded request body.
     // SAFETY: exposes the device code
     pub fn to_serializer(&self) -> Serializer<'a, String> {
         let mut serializer = Serializer::new(String::new());
@@ -150,7 +205,7 @@ impl<'a> Oauth20DeviceAccessTokenRequestParams<'a> {
     }
 }
 
-impl fmt::Display for Oauth20DeviceAccessTokenRequestParams<'_> {
+impl fmt::Display for Oauth20RequestDeviceAccessTokenParams<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_serializer().finish())
     }
