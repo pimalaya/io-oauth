@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-15
+
 ### Added
 
 - Added `rfc7591::source::Oauth20ClientSource`, the ways a client obtains its registration (dynamic registration, well-known public client, manual registration) declared in preference order, so wizards and pick lists sort by it.
@@ -75,7 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added OAuth 2.0 module with authorization code grant flow
 
-[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.1.0..master
+[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.2.0..HEAD
+[0.2.0]: https://github.com/pimalaya/io-oauth/compare/v0.1.0..v0.2.0
 [0.1.0]: https://github.com/pimalaya/io-oauth/compare/v0.0.4..v0.1.0
 [0.0.4]: https://github.com/pimalaya/io-oauth/compare/v0.0.3..v0.0.4
 [0.0.3]: https://github.com/pimalaya/io-oauth/compare/v0.0.2..v0.0.3
