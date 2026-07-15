@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `rfc7591::source::Oauth20ClientSource`, the ways a client obtains its registration (dynamic registration, well-known public client, manual registration) declared in preference order, so wizards and pick lists sort by it.
+- Added `Oauth20ClientStd::register_client`, inlining the RFC 7591 registration coroutine against a registration endpoint like the other per-operation methods.
+
 ## [0.1.0] - 2026-07-13
 
 ### Added

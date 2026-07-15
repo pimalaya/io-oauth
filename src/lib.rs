@@ -31,7 +31,9 @@
 //!   - the optional std-blocking [`rfc6749::client::Oauth20ClientStd`]
 //!     pump: a light client wrapping any stream (`client` feature), or a
 //!     full client opening the TCP/TLS connection itself (TLS features).
-//! - [`rfc7591`]: dynamic client registration ([`rfc7591::register`]).
+//! - [`rfc7591`]: dynamic client registration ([`rfc7591::register`]),
+//!   plus the preference order between the ways a client obtains its
+//!   registration ([`rfc7591::source`]).
 //! - [`rfc7636`]: PKCE ([`rfc7636::pkce`]), used by the authorization
 //!   code grant.
 //! - [`rfc8628`]: the device authorization grant: [`rfc8628::auth`]

@@ -62,6 +62,10 @@ use crate::{
             Oauth20RefreshAccessTokenParams, Oauth20RefreshAccessTokenResult,
         },
     },
+    rfc7591::register::{
+        Oauth20RegisterClient, Oauth20RegisterClientError, Oauth20RegisterClientParams,
+        Oauth20RegisterClientResponse, Oauth20RegisterClientResult,
+    },
     rfc8628::{
         auth::{
             Oauth20DeviceAuthResponse, Oauth20RequestDeviceAuth, Oauth20RequestDeviceAuthError,
@@ -100,6 +104,12 @@ pub enum Oauth20ClientStdError {
     /// The device code expired before the user completed the flow.
     #[error("OAuth 2.0 device code expired before the user completed authorization")]
     DeviceCodeExpired,
+    /// The client registration failed.
+    #[error(transparent)]
+    RegisterClient(#[from] Oauth20RegisterClientError),
+    /// The client registration params could not be serialized.
+    #[error("Serialize OAuth 2.0 client registration params: {0}")]
+    SerializeRegisterClientParams(serde_json::Error),
     /// Opening the TCP/TLS connection failed.
     #[cfg(any(
         feature = "rustls-aws",
@@ -375,6 +385,39 @@ impl Oauth20ClientStd {
                     }
                     _ => return Ok(Err(err)),
                 },
+            }
+        }
+    }
+
+    /// Registers a client dynamically against `endpoint` (RFC 7591).
+    ///
+    /// The registration endpoint usually lives on the token
+    /// endpoint's host; when it does not, wrap a stream connected to
+    /// it instead (see [`Self::set_stream`]). Returns the server's
+    /// response: the issued client information, or the params of a
+    /// rejected registration.
+    pub fn register_client(
+        &mut self,
+        endpoint: &Url,
+        params: &Oauth20RegisterClientParams,
+    ) -> Result<Oauth20RegisterClientResponse, Oauth20ClientStdError> {
+        let request = self.build_post_request(endpoint);
+        let mut coroutine = Oauth20RegisterClient::new(request, params)
+            .map_err(Oauth20ClientStdError::SerializeRegisterClientParams)?;
+        let mut buf = [0u8; READ_BUFFER_SIZE];
+        let mut arg: Option<&[u8]> = None;
+
+        loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20RegisterClientResult::Ok(res) => return Ok(res),
+                Oauth20RegisterClientResult::WantsRead => {
+                    let n = self.stream.read(&mut buf)?;
+                    arg = Some(&buf[..n]);
+                }
+                Oauth20RegisterClientResult::WantsWrite(bytes) => {
+                    self.stream.write_all(&bytes)?;
+                }
+                Oauth20RegisterClientResult::Err(err) => return Err(err.into()),
             }
         }
     }
