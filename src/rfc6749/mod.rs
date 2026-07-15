@@ -5,8 +5,6 @@
 pub mod access_token_request;
 pub mod auth_request;
 pub mod auth_response;
-#[cfg(feature = "client")]
-pub mod client;
 pub mod client_credentials;
 pub mod issue_access_token;
 pub mod refresh_access_token;

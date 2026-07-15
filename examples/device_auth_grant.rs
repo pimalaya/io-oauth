@@ -3,7 +3,7 @@ use std::{
     io::{Write, stdin, stdout},
 };
 
-use io_oauth::{rfc6749::client::Oauth20ClientStd, rfc8628::auth::Oauth20RequestDeviceAuthParams};
+use io_oauth::{client::Oauth20ClientStd, rfc8628::auth::Oauth20RequestDeviceAuthParams};
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
 use url::Url;

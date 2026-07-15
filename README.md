@@ -41,10 +41,12 @@ This library is composed of 3 feature-gated layers:
 
 | Module   | What it covers                                                                                                              |
 |----------|---------------------------------------------------------------------------------------------------------------------------|
-| [6749]   | OAuth 2.0 framework: authorization code grant (`Oauth20RequestAccessToken`), client credentials (`Oauth20RequestClientCredentials`), token issue/refresh (`Oauth20RefreshAccessToken`), CSRF state, and the std client `Oauth20ClientStd` |
-| [7591]   | Dynamic client registration: `Oauth20RegisterClient` coroutine                                                            |
+| [6749]   | OAuth 2.0 framework: authorization code grant (`Oauth20RequestAccessToken`), client credentials (`Oauth20RequestClientCredentials`), token issue/refresh (`Oauth20RefreshAccessToken`), CSRF state |
+| [7591]   | Dynamic client registration: `Oauth20RegisterClient` coroutine, `Oauth20ClientSource` preference order                    |
 | [7636]   | PKCE: `Oauth20PkceCodeChallenge` / `Oauth20PkceCodeVerifier`                                                              |
 | [8628]   | Device authorization grant: `Oauth20RequestDeviceAuth` and `Oauth20RequestDeviceAccessToken` coroutines                   |
+
+The std-blocking OAuth 2.0 client `Oauth20ClientStd` lives in the crate-root `client` module: it spans the RFC modules (token operations, device grant, dynamic client registration), inlining their coroutine loops as per-operation methods. A future OAuth version would add its own client alongside, unified behind a version-agnostic `Oauth20ClientStd` wrapper only once one exists.
 
 [6749]: https://www.rfc-editor.org/rfc/rfc6749
 [7591]: https://www.rfc-editor.org/rfc/rfc7591
@@ -136,8 +138,8 @@ io-oauth = { version = "0.1", default-features = false, features = ["client"] }
 ```rust,no_run
 use std::net::TcpStream;
 
-use io_oauth::rfc6749::{
-    access_token_request::Oauth20RequestAccessTokenParams, client::Oauth20ClientStd,
+use io_oauth::{
+    client::Oauth20ClientStd, rfc6749::access_token_request::Oauth20RequestAccessTokenParams,
 };
 use url::Url;
 
@@ -169,8 +171,8 @@ io-oauth = "0.1" # rustls-ring is enabled by default
 ```
 
 ```rust,no_run
-use io_oauth::rfc6749::{
-    access_token_request::Oauth20RequestAccessTokenParams, client::Oauth20ClientStd,
+use io_oauth::{
+    client::Oauth20ClientStd, rfc6749::access_token_request::Oauth20RequestAccessTokenParams,
 };
 use pimalaya_stream::tls::Tls;
 use url::Url;

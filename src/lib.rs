@@ -27,10 +27,7 @@
 //!     [`rfc6749::client_credentials`];
 //!   - issuing (§5) and refreshing (§6) tokens:
 //!     [`rfc6749::issue_access_token`],
-//!     [`rfc6749::refresh_access_token`];
-//!   - the optional std-blocking [`rfc6749::client::Oauth20ClientStd`]
-//!     pump: a light client wrapping any stream (`client` feature), or a
-//!     full client opening the TCP/TLS connection itself (TLS features).
+//!     [`rfc6749::refresh_access_token`].
 //! - [`rfc7591`]: dynamic client registration ([`rfc7591::register`]),
 //!   plus the preference order between the ways a client obtains its
 //!   registration ([`rfc7591::source`]).
@@ -39,6 +36,14 @@
 //! - [`rfc8628`]: the device authorization grant: [`rfc8628::auth`]
 //!   (device and user code request) and [`rfc8628::token`] (token
 //!   endpoint polling).
+//! - [`client`]: the optional std-blocking [`client::Oauth20ClientStd`]
+//!   pump (`client` feature): a light client wrapping any stream, or a
+//!   full client opening the TCP/TLS connection itself (TLS features).
+//!   It spans the RFC modules (token operations, device grant, dynamic
+//!   client registration), which is why it lives at the crate root
+//!   rather than under one of them; a future OAuth version would add
+//!   its own client alongside, unified behind a version-agnostic
+//!   `OauthClientStd` wrapper only once one exists.
 //!
 //! ## Intentional omissions
 //!
@@ -80,6 +85,8 @@ extern crate alloc;
 #[cfg(feature = "client")]
 extern crate std;
 
+#[cfg(feature = "client")]
+pub mod client;
 pub mod rfc6749;
 pub mod rfc7591;
 pub mod rfc7636;

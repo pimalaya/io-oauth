@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `rfc7591::source::Oauth20ClientSource`, the ways a client obtains its registration (dynamic registration, well-known public client, manual registration) declared in preference order, so wizards and pick lists sort by it.
 - Added `Oauth20ClientStd::register_client`, inlining the RFC 7591 registration coroutine against a registration endpoint like the other per-operation methods.
 
+### Changed
+
+- Moved the std client (and `await_redirect`) from `rfc6749::client` to the crate-root `client` module, since it spans the RFC modules (token operations, device grant, dynamic client registration) rather than belonging to RFC 6749. `Oauth20ClientStd` keeps its version-scoped name and version-less methods; a future OAuth version would add its own client alongside, unified behind a version-agnostic wrapper only once one exists.
+
 ## [0.1.0] - 2026-07-13
 
 ### Added

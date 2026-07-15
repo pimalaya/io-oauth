@@ -3,7 +3,10 @@
 //! [`Oauth20ClientStd::new`] wraps any pre-connected `Read + Write + Send`
 //! stream, while the TLS-gated [`Oauth20ClientStd::connect`] opens the TCP/TLS
 //! stream itself. Per-operation methods inline the coroutine loop against the
-//! client's stream.
+//! client's stream. The client spans the RFC modules (token operations, device
+//! grant, dynamic client registration), hence its home at the crate root; a
+//! future OAuth version would add its own client alongside, unified behind a
+//! version-agnostic `OauthClientStd` wrapper only once one exists.
 
 use alloc::{
     boxed::Box,
@@ -48,34 +51,11 @@ use crate::{
 };
 use crate::{
     rfc6749::{
-        access_token_request::{
-            Oauth20RequestAccessToken, Oauth20RequestAccessTokenError,
-            Oauth20RequestAccessTokenParams, Oauth20RequestAccessTokenResult,
-        },
-        client_credentials::{
-            Oauth20RequestClientCredentials, Oauth20RequestClientCredentialsError,
-            Oauth20RequestClientCredentialsParams, Oauth20RequestClientCredentialsResult,
-        },
-        issue_access_token::Oauth20AccessTokenResponse,
-        refresh_access_token::{
-            Oauth20RefreshAccessToken, Oauth20RefreshAccessTokenError,
-            Oauth20RefreshAccessTokenParams, Oauth20RefreshAccessTokenResult,
-        },
+        access_token_request::*, client_credentials::*, issue_access_token::*,
+        refresh_access_token::*,
     },
-    rfc7591::register::{
-        Oauth20RegisterClient, Oauth20RegisterClientError, Oauth20RegisterClientParams,
-        Oauth20RegisterClientResponse, Oauth20RegisterClientResult,
-    },
-    rfc8628::{
-        auth::{
-            Oauth20DeviceAuthResponse, Oauth20RequestDeviceAuth, Oauth20RequestDeviceAuthError,
-            Oauth20RequestDeviceAuthParams, Oauth20RequestDeviceAuthResult,
-        },
-        token::{
-            Oauth20RequestDeviceAccessToken, Oauth20RequestDeviceAccessTokenError,
-            Oauth20RequestDeviceAccessTokenParams, Oauth20RequestDeviceAccessTokenResult,
-        },
-    },
+    rfc7591::register::*,
+    rfc8628::{auth::*, token::*},
 };
 
 const READ_BUFFER_SIZE: usize = 8 * 1024;
