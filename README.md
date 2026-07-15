@@ -4,31 +4,31 @@ OAuth client library for Rust
 
 This library is composed of 3 feature-gated layers:
 
-- Low-level **I/O-free** coroutines: these `no_std`-compatible state machines contain the whole OAuth logic and can be used anywhere
-- Mid-level **light client**: a standard, blocking client using a `Stream: Read + Write`
-- High-level **full client**: light client + TCP connections and TLS negotiations handled for you
+- Low-level **I/O-free** coroutines: no_std-compatible state machines containing the whole OAuth logic, usable anywhere
+- Mid-level **light client**: a standard, blocking client wrapping a stream you opened yourself
+- High-level **full client**: the light client plus TCP connections and TLS negotiations handled for you
 
 ## Table of contents
 
 - [Features](#features)
 - [RFC coverage](#rfc-coverage)
 - [Usage](#usage)
-  - [Coroutine](#coroutine)
-  - [Light client](#light-client)
-  - [Full client](#full-client)
 - [Examples](#examples)
 - [AI disclosure](#ai-disclosure)
 - [License](#license)
 - [Social](#social)
+- [Contributing](#contributing)
 - [Sponsoring](#sponsoring)
 
 ## Features
 
-- **I/O-free** coroutines: `no_std` state machines; no sockets, no async runtime, no `std` required, drive against any blocking, async, or fuzz harness.
-- **Grants**: authorization code (RFC 6749 §4.1) with PKCE (RFC 7636), client credentials (§4.4), device authorization (RFC 8628).
-- **Token lifecycle**: issue (§5) and refresh (§6) access tokens.
-- **Dynamic client registration** (RFC 7591): register a public client with no console nor secret.
-- Light standard, blocking client (requires `client` feature)
+- **I/O-free coroutines**: no_std state machines with no sockets and no async runtime, resumable from any blocking, async or in-memory test harness.
+- **Authorization code grant with PKCE**: the browser-redirect sign-in flow, hardened for public clients.
+- **Device authorization grant**: sign in by typing a short code on another device, for hosts without a browser.
+- **Client credentials grant**: tokens for machine-to-machine access, with no end user involved.
+- **Token refresh**: trade a refresh token for a fresh access token, whatever grant issued it.
+- **Dynamic client registration**: register a public client on the fly, no provider console nor secret needed.
+- Light standard, blocking client wrapping a stream you opened yourself
 - Full standard, blocking client with **TLS** support:
   - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
@@ -39,14 +39,12 @@ This library is composed of 3 feature-gated layers:
 
 ## RFC coverage
 
-| Module   | What it covers                                                                                                              |
-|----------|---------------------------------------------------------------------------------------------------------------------------|
-| [6749]   | OAuth 2.0 framework: authorization code grant (`Oauth20RequestAccessToken`), client credentials (`Oauth20RequestClientCredentials`), token issue/refresh (`Oauth20RefreshAccessToken`), CSRF state |
-| [7591]   | Dynamic client registration: `Oauth20RegisterClient` coroutine, `Oauth20ClientSource` preference order                    |
-| [7636]   | PKCE: `Oauth20PkceCodeChallenge` / `Oauth20PkceCodeVerifier`                                                              |
-| [8628]   | Device authorization grant: `Oauth20RequestDeviceAuth` and `Oauth20RequestDeviceAccessToken` coroutines                   |
-
-The std-blocking OAuth 2.0 client `Oauth20ClientStd` lives in the crate-root `client` module: it spans the RFC modules (token operations, device grant, dynamic client registration), inlining their coroutine loops as per-operation methods. A future OAuth version would add its own client alongside, unified behind a version-agnostic `Oauth20ClientStd` wrapper only once one exists.
+| RFC    | What is covered                                                                                      |
+|--------|------------------------------------------------------------------------------------------------------|
+| [6749] | The OAuth 2.0 framework: authorization code grant, client credentials grant, token issuance and refresh, CSRF state |
+| [7591] | Dynamic client registration, plus the preference order between the ways a client obtains its registration |
+| [7636] | PKCE: the proof key securing the authorization code grant for public clients                          |
+| [8628] | Device authorization grant: device and user code request, token endpoint polling                      |
 
 [6749]: https://www.rfc-editor.org/rfc/rfc6749
 [7591]: https://www.rfc-editor.org/rfc/rfc7591
@@ -55,167 +53,21 @@ The std-blocking OAuth 2.0 client `Oauth20ClientStd` lives in the crate-root `cl
 
 ## Usage
 
-I/O OAuth can be consumed three ways, depending on how much of the I/O stack you want to own. Each mode is gated by cargo features.
-
-Every coroutine exposes `new(request, params)` plus a `resume(arg: Option<&[u8]>)` method returning a per-coroutine result enum with four variants:
-
-- `WantsRead`: the coroutine wants bytes read from the socket and handed back on the next `resume`.
-- `WantsWrite(Vec<u8>)`: the coroutine wants these bytes written to the socket.
-- `Ok(..)`: terminal; carries the parsed response (a `Result` of success or error params).
-- `Err(..)`: terminal; the coroutine itself failed (transport, parsing, unexpected redirect).
-
-### Coroutine
-
-No features required: works in `#![no_std]`, no sockets, no async runtime. You own the loop and the bytes; the library only produces request bytes and consumes server responses.
-
-```toml,ignore
-[dependencies]
-io-oauth = { version = "0.1", default-features = false }
-```
-
-Exchange an authorization code for an access token (the same shape works under blocking, async, or in-memory replay):
-
-```rust,no_run
-use std::{
-    io::{Read, Write},
-    net::TcpStream,
-};
-
-use io_http::rfc9110::request::HttpRequest;
-use io_oauth::rfc6749::access_token_request::{
-    Oauth20RequestAccessToken, Oauth20RequestAccessTokenParams, Oauth20RequestAccessTokenResult,
-};
-use url::Url;
-
-let token_url = Url::parse("https://example.com/token").unwrap();
-let request = HttpRequest {
-    method: "POST".into(),
-    url: token_url.clone(),
-    headers: Vec::new(),
-    body: Vec::new(),
-}
-.header("Host", token_url.host_str().unwrap());
-
-let params = Oauth20RequestAccessTokenParams {
-    code: "the-authorization-code".into(),
-    redirect_uri: None,
-    client_id: "client-id".into(),
-    client_secret: None,
-    pkce_code_verifier: None,
-};
-
-let mut stream = TcpStream::connect("example.com:443").unwrap();
-let mut coroutine = Oauth20RequestAccessToken::new(request, params);
-let mut arg: Option<&[u8]> = None;
-let mut buf = [0u8; 4096];
-
-let response = loop {
-    match coroutine.resume(arg.take()) {
-        Oauth20RequestAccessTokenResult::Ok(res) => break res,
-        Oauth20RequestAccessTokenResult::WantsRead => {
-            let n = stream.read(&mut buf).unwrap();
-            arg = Some(&buf[..n]);
-        }
-        Oauth20RequestAccessTokenResult::WantsWrite(bytes) => {
-            stream.write_all(&bytes).unwrap();
-        }
-        Oauth20RequestAccessTokenResult::Err(err) => panic!("{err}"),
-    }
-};
-
-println!("issued: {}", response.is_ok());
-```
-
-### Light client
-
-Enable the `client` feature. `Oauth20ClientStd::new(stream, token_endpoint, client_id)` wraps any blocking `Read + Write + Send` and runs the coroutine loop for you. You still open the TCP socket and run TLS yourself, then hand over a ready-to-talk stream; the client takes it from there.
-
-```toml,ignore
-[dependencies]
-io-oauth = { version = "0.1", default-features = false, features = ["client"] }
-```
-
-```rust,no_run
-use std::net::TcpStream;
-
-use io_oauth::{
-    client::Oauth20ClientStd, rfc6749::access_token_request::Oauth20RequestAccessTokenParams,
-};
-use url::Url;
-
-let token_url = Url::parse("https://example.com/token").unwrap();
-
-// open (and, for https, TLS-wrap) the stream yourself:
-let stream = TcpStream::connect("example.com:443").unwrap();
-let mut client = Oauth20ClientStd::new(stream, token_url, "client-id");
-
-let params = Oauth20RequestAccessTokenParams {
-    code: "the-authorization-code".into(),
-    redirect_uri: None,
-    client_id: "client-id".into(),
-    client_secret: None,
-    pkce_code_verifier: None,
-};
-
-let response = client.request_access_token(params).unwrap();
-println!("issued: {}", response.is_ok());
-```
-
-### Full client
-
-Enable one of the TLS feature flags: `rustls-ring` (default), `rustls-aws`, or `native-tls`. `Oauth20ClientStd::connect(token_endpoint, tls, client_id)` opens `http://` (plain TCP) or `https://` (implicit TLS) via [pimalaya/stream](https://github.com/pimalaya/stream), returning a ready-to-use client.
-
-```toml,ignore
-[dependencies]
-io-oauth = "0.1" # rustls-ring is enabled by default
-```
-
-```rust,no_run
-use io_oauth::{
-    client::Oauth20ClientStd, rfc6749::access_token_request::Oauth20RequestAccessTokenParams,
-};
-use pimalaya_stream::tls::Tls;
-use url::Url;
-
-let token_url = Url::parse("https://example.com/token").unwrap();
-let tls = Tls::default();
-let mut client = Oauth20ClientStd::connect(token_url, &tls, "client-id").unwrap();
-
-let params = Oauth20RequestAccessTokenParams {
-    code: "the-authorization-code".into(),
-    redirect_uri: None,
-    client_id: "client-id".into(),
-    client_secret: None,
-    pkce_code_verifier: None,
-};
-
-let response = client.request_access_token(params).unwrap();
-println!("issued: {}", response.is_ok());
-```
+The whole API is documented on [docs.rs](https://docs.rs/io-oauth/latest/io_oauth), including runnable snippets for every coroutine and client.
 
 ## Examples
 
-See complete examples at [./examples](https://github.com/pimalaya/io-oauth/blob/master/examples).
-
-Have also a look at real-world projects built on top of this library:
-
-- [Ortie](https://github.com/pimalaya/ortie): CLI to manage OAuth access tokens
-- [Cardamum](https://github.com/pimalaya/cardamum): CLI to manage contacts
+Complete runnable programs live in [./examples](./examples); the tests also demonstrate real usage.
 
 ## AI disclosure
 
 This project is developed with AI assistance. This section documents how, so users and downstream packagers can make informed decisions.
 
-- **Tools**: Claude Code (Anthropic), Opus 4.8, invoked locally with a persistent project-scoped memory and a small set of repo-specific rules.
-
+- **Tools**: Claude Code (Anthropic), invoked locally with a persistent project-scoped memory and a small set of repo-specific rules.
 - **Used for**: Refactors, mechanical multi-file edits, boilerplate (feature gates, error enums, derive macros, trait impls), test scaffolding, doc polish, exploratory design conversations.
-
 - **Not used for**: Engineering, critical code, git manipulation (commit, merge, rebase…), real-world tests.
-
-- **Verification**: Every AI-assisted change is read, compiled, tested, and formatted before commit (`nix develop --command cargo check / cargo test / cargo fmt`). Behavioural correctness is verified against the relevant RFC or upstream spec, not assumed from the model output. Tests are never adjusted to fit AI-generated code; the code is adjusted to fit correct behaviour.
-
-- **Limitations**: AI models occasionally produce code that compiles and passes tests but is subtly wrong: off-by-one errors, missed edge cases, plausible but nonexistent APIs, stale RFC references. The verification workflow catches most of this; it does not catch all of it. Bug reports are welcome and taken seriously.
-
+- **Verification**: Every AI-assisted change is read, compiled, tested, and formatted before commit. Behavioural correctness is verified against the relevant RFC or upstream spec, not assumed from the model output. Tests are never adjusted to fit AI-generated code; the code is adjusted to fit correct behaviour.
+- **Limitations**: AI models occasionally produce code that compiles and passes tests but is subtly wrong. The verification workflow catches most of this; it does not catch all of it. Bug reports are welcome and taken seriously.
 - **Last reviewed**: 13/07/2026
 
 ## License
@@ -232,6 +84,10 @@ at your option.
 - Chat on [Matrix](https://matrix.to/#/#pimalaya:matrix.org)
 - News on [Mastodon](https://fosstodon.org/@pimalaya) or [RSS](https://fosstodon.org/@pimalaya.rss)
 - Mail at [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net)
+
+## Contributing
+
+Contributions are welcome: start with [CONTRIBUTING.md](./CONTRIBUTING.md), which opens with the Pimalaya-wide guides to read first.
 
 ## Sponsoring
 

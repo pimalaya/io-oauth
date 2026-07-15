@@ -1,6 +1,8 @@
-//! Module dedicated to the section 4.1.3: Access Token Request.
+//! Access token request (RFC 6749 section 4.1.3).
 //!
-//! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.3>
+//! Exchanges an authorization code for an access token against the
+//! token endpoint. Consumed by the authorization code grant, next to
+//! the auth request and auth response modules.
 //!
 //! # Example
 //!
@@ -11,10 +13,7 @@
 //! };
 //!
 //! use io_http::rfc9110::request::HttpRequest;
-//! use io_oauth::rfc6749::access_token_request::{
-//!     Oauth20RequestAccessToken, Oauth20RequestAccessTokenParams,
-//!     Oauth20RequestAccessTokenResult,
-//! };
+//! use io_oauth::rfc6749::access_token_request::*;
 //! use url::Url;
 //!
 //! let token_url = Url::parse("https://example.com/token").unwrap();
@@ -26,7 +25,7 @@
 //! }
 //! .header("Host", token_url.host_str().unwrap());
 //!
-//! let params = Oauth20RequestAccessTokenParams {
+//! let params = Oauth20AccessTokenRequestParams {
 //!     code: "the-authorization-code".into(),
 //!     redirect_uri: None,
 //!     client_id: "client-id".into(),
@@ -35,21 +34,21 @@
 //! };
 //!
 //! let mut stream = TcpStream::connect("example.com:443").unwrap();
-//! let mut coroutine = Oauth20RequestAccessToken::new(request, params);
+//! let mut coroutine = Oauth20AccessTokenRequest::new(request, params);
 //! let mut arg: Option<&[u8]> = None;
 //! let mut buf = [0u8; 4096];
 //!
 //! let response = loop {
 //!     match coroutine.resume(arg.take()) {
-//!         Oauth20RequestAccessTokenResult::Ok(res) => break res,
-//!         Oauth20RequestAccessTokenResult::WantsRead => {
+//!         Oauth20AccessTokenRequestResult::Ok(res) => break res,
+//!         Oauth20AccessTokenRequestResult::WantsRead => {
 //!             let n = stream.read(&mut buf).unwrap();
 //!             arg = Some(&buf[..n]);
 //!         }
-//!         Oauth20RequestAccessTokenResult::WantsWrite(bytes) => {
+//!         Oauth20AccessTokenRequestResult::WantsWrite(bytes) => {
 //!             stream.write_all(&bytes).unwrap();
 //!         }
-//!         Oauth20RequestAccessTokenResult::Err(err) => panic!("{err}"),
+//!         Oauth20AccessTokenRequestResult::Err(err) => panic!("{err}"),
 //!     }
 //! };
 //! # let _ = response;
@@ -71,14 +70,15 @@ use io_http::{
     },
     rfc9112::send::{Http11Send, Http11SendError},
 };
+use log::{debug, trace};
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use url::{Url, form_urlencoded::Serializer};
 
 use crate::{
     rfc6749::issue_access_token::{
-        Oauth20AccessTokenResponse, Oauth20IssueAccessTokenErrorParams,
-        Oauth20IssueAccessTokenSuccessParams, parse_http_date,
+        Oauth20AccessTokenErrorParams, Oauth20AccessTokenResponse, Oauth20AccessTokenSuccessParams,
+        parse_http_date,
     },
     rfc7636::pkce::Oauth20PkceCodeVerifier,
 };
@@ -86,7 +86,7 @@ use crate::{
 /// The access token request parameters, exchanging the authorization code.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.3>
-pub struct Oauth20RequestAccessTokenParams<'a> {
+pub struct Oauth20AccessTokenRequestParams<'a> {
     /// The authorization code received on the redirect.
     pub code: Cow<'a, str>,
     /// The redirection URI, when it was part of the authorization request.
@@ -105,7 +105,7 @@ pub struct Oauth20RequestAccessTokenParams<'a> {
     pub pkce_code_verifier: Option<Cow<'a, Oauth20PkceCodeVerifier>>,
 }
 
-impl<'a> Oauth20RequestAccessTokenParams<'a> {
+impl<'a> Oauth20AccessTokenRequestParams<'a> {
     /// Serializes the params into the form-urlencoded request body.
     // SAFETY: this function exposes the code and the PKCE code verifier
     pub fn to_form_url_encoded_serializer(&self) -> Serializer<'a, String> {
@@ -133,7 +133,7 @@ impl<'a> Oauth20RequestAccessTokenParams<'a> {
     }
 }
 
-impl fmt::Display for Oauth20RequestAccessTokenParams<'_> {
+impl fmt::Display for Oauth20AccessTokenRequestParams<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_form_url_encoded_serializer().finish())
     }
@@ -141,7 +141,7 @@ impl fmt::Display for Oauth20RequestAccessTokenParams<'_> {
 
 /// Errors that can occur during the coroutine progression.
 #[derive(Debug, Error)]
-pub enum Oauth20RequestAccessTokenError {
+pub enum Oauth20AccessTokenRequestError {
     /// The HTTP request could not be sent.
     #[error(transparent)]
     SendHttpRequest(#[from] Http11SendError),
@@ -160,7 +160,7 @@ pub enum Oauth20RequestAccessTokenError {
 
 /// Result returned by the coroutine's resume function.
 #[derive(Debug)]
-pub enum Oauth20RequestAccessTokenResult {
+pub enum Oauth20AccessTokenRequestResult {
     /// The coroutine has successfully terminated its execution.
     Ok(Oauth20AccessTokenResponse),
     /// The coroutine wants the socket to be read into.
@@ -168,7 +168,7 @@ pub enum Oauth20RequestAccessTokenResult {
     /// The coroutine wants the given bytes to be written to the socket.
     WantsWrite(Vec<u8>),
     /// The coroutine encountered an error.
-    Err(Oauth20RequestAccessTokenError),
+    Err(Oauth20AccessTokenRequestError),
 }
 
 /// The I/O-free coroutine to exchange an authorization code for an access
@@ -176,13 +176,16 @@ pub enum Oauth20RequestAccessTokenResult {
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1>
 #[derive(Debug)]
-pub struct Oauth20RequestAccessToken {
+pub struct Oauth20AccessTokenRequest {
     send: Http11Send,
 }
 
-impl Oauth20RequestAccessToken {
+impl Oauth20AccessTokenRequest {
     /// Creates the coroutine to exchange an authorization code.
-    pub fn new(request: HttpRequest, body: Oauth20RequestAccessTokenParams<'_>) -> Self {
+    pub fn new(request: HttpRequest, body: Oauth20AccessTokenRequestParams<'_>) -> Self {
+        debug!("prepare access token request");
+        trace!("url: {}", request.url);
+
         let request = request
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body.to_string().into_bytes());
@@ -193,39 +196,45 @@ impl Oauth20RequestAccessToken {
     }
 
     /// Makes the coroutine progress.
-    pub fn resume(&mut self, arg: Option<&[u8]>) -> Oauth20RequestAccessTokenResult {
+    pub fn resume(&mut self, arg: Option<&[u8]>) -> Oauth20AccessTokenRequestResult {
         match self.send.resume(arg) {
             HttpCoroutineState::Complete(Ok(HttpSendOutput { response, .. }))
                 if response.status.is_success() =>
             {
-                match Oauth20IssueAccessTokenSuccessParams::try_from(response.body.as_slice()) {
+                debug!("received access token response");
+                trace!("status: {}", *response.status);
+
+                match Oauth20AccessTokenSuccessParams::try_from(response.body.as_slice()) {
                     Ok(mut res) => {
                         res.issued_at = response.header("date").and_then(parse_http_date);
-                        Oauth20RequestAccessTokenResult::Ok(Ok(res))
+                        Oauth20AccessTokenRequestResult::Ok(Ok(res))
                     }
-                    Err(err) => Oauth20RequestAccessTokenResult::Err(err.into()),
+                    Err(err) => Oauth20AccessTokenRequestResult::Err(err.into()),
                 }
             }
             HttpCoroutineState::Complete(Ok(HttpSendOutput { response, .. })) => {
-                match Oauth20IssueAccessTokenErrorParams::try_from(response.body.as_slice()) {
-                    Ok(res) => Oauth20RequestAccessTokenResult::Ok(Err(res)),
-                    Err(err) => Oauth20RequestAccessTokenResult::Err(err.into()),
+                debug!("received access token error response");
+                trace!("status: {}", *response.status);
+
+                match Oauth20AccessTokenErrorParams::try_from(response.body.as_slice()) {
+                    Ok(res) => Oauth20AccessTokenRequestResult::Ok(Err(res)),
+                    Err(err) => Oauth20AccessTokenRequestResult::Err(err.into()),
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
-                Oauth20RequestAccessTokenResult::WantsRead
+                Oauth20AccessTokenRequestResult::WantsRead
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsWrite(bytes)) => {
-                Oauth20RequestAccessTokenResult::WantsWrite(bytes)
+                Oauth20AccessTokenRequestResult::WantsWrite(bytes)
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRedirect { url, response, .. }) => {
-                Oauth20RequestAccessTokenResult::Err(Oauth20RequestAccessTokenError::Redirect {
+                Oauth20AccessTokenRequestResult::Err(Oauth20AccessTokenRequestError::Redirect {
                     url,
                     code: *response.status,
                 })
             }
             HttpCoroutineState::Complete(Err(err)) => {
-                Oauth20RequestAccessTokenResult::Err(err.into())
+                Oauth20AccessTokenRequestResult::Err(err.into())
             }
         }
     }

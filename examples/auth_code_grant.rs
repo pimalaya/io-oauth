@@ -9,12 +9,8 @@ use std::{
 
 use io_http::rfc9110::request::HttpRequest;
 use io_oauth::rfc6749::{
-    access_token_request::{
-        Oauth20RequestAccessToken, Oauth20RequestAccessTokenParams, Oauth20RequestAccessTokenResult,
-    },
-    auth_request::Oauth20AuthRequestParams,
-    auth_response::Oauth20AuthParams,
-    state::Oauth20State,
+    access_token_request::*, auth_request::Oauth20AuthRequestParams,
+    auth_response::Oauth20AuthParams, state::Oauth20State,
 };
 use rustls::{ClientConfig, ClientConnection, StreamOwned};
 use rustls_platform_verifier::ConfigVerifierExt;
@@ -51,7 +47,8 @@ fn main() {
 
     let mut stream = connect(&token_uri);
 
-    // 1. authorization request: build URL for user to browse
+    // NOTE: step 1, authorization request: build the URL the user
+    // browses to
 
     let state = Oauth20State::default();
     let auth_uri = Oauth20AuthRequestParams {
@@ -68,7 +65,8 @@ fn main() {
     println!("Navigate to the following URI: {auth_uri}");
     println!();
 
-    // 2. authorization response: extract code, check states
+    // NOTE: step 2, authorization response: extract the code and
+    // check the states
 
     let redirected_uri: Url = read_line("Redirected URI?").parse().unwrap();
     println!();
@@ -83,7 +81,7 @@ fn main() {
         panic!("states mismatch");
     }
 
-    // 3. access token request: send request
+    // NOTE: step 3, access token request: send the request
 
     let host = token_uri.host_str().unwrap();
     let port = token_uri.port_or_known_default().unwrap();
@@ -95,7 +93,7 @@ fn main() {
     }
     .header("Host", format!("{host}:{port}"));
 
-    let params = Oauth20RequestAccessTokenParams {
+    let params = Oauth20AccessTokenRequestParams {
         code: response_params.code,
         redirect_uri: Some(redirect_uri.into()),
         client_id: client_id.into(),
@@ -103,24 +101,24 @@ fn main() {
         pkce_code_verifier: None,
     };
 
-    let mut send = Oauth20RequestAccessToken::new(request, params);
+    let mut send = Oauth20AccessTokenRequest::new(request, params);
     let mut buf = [0u8; 4096];
     let mut arg: Option<&[u8]> = None;
 
     let res = loop {
         match send.resume(arg.take()) {
-            Oauth20RequestAccessTokenResult::Ok(res) => break res,
-            Oauth20RequestAccessTokenResult::WantsRead => {
+            Oauth20AccessTokenRequestResult::Ok(res) => break res,
+            Oauth20AccessTokenRequestResult::WantsRead => {
                 let n = stream.read(&mut buf).unwrap();
                 arg = Some(&buf[..n]);
             }
-            Oauth20RequestAccessTokenResult::WantsWrite(bytes) => stream.write_all(&bytes).unwrap(),
-            Oauth20RequestAccessTokenResult::Err(err) => panic!("send request error: {err}"),
+            Oauth20AccessTokenRequestResult::WantsWrite(bytes) => stream.write_all(&bytes).unwrap(),
+            Oauth20AccessTokenRequestResult::Err(err) => panic!("send request error: {err}"),
         }
     };
 
-    // 4. access token response: extract access token and potential
-    // refresh token
+    // NOTE: step 4, access token response: extract the access token
+    // and the potential refresh token
 
     match res {
         Ok(res) => {

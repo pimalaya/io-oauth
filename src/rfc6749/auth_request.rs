@@ -1,6 +1,8 @@
-//! Module dedicated to the section 4.1.1: Authorization Request.
+//! Authorization request (RFC 6749 section 4.1.1).
 //!
-//! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.1>
+//! Builds the authorization URL the end user browses to, opening the
+//! authorization code grant; the redirect back is parsed by the auth
+//! response sibling module.
 
 use alloc::{
     borrow::Cow,

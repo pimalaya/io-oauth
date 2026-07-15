@@ -1,0 +1,12 @@
+# Security Policy
+
+## Supported Versions
+
+| Version | Supported      |
+| ------- | -------------- |
+| 0.1.x   | :green_circle: |
+| 0.0.x   | :red_circle:   |
+
+## Reporting a Vulnerability
+
+https://github.com/pimalaya/io-oauth/issues

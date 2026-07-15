@@ -3,7 +3,7 @@ use std::{
     io::{Write, stdin, stdout},
 };
 
-use io_oauth::{client::Oauth20ClientStd, rfc8628::auth::Oauth20RequestDeviceAuthParams};
+use io_oauth::{client::Oauth20ClientStd, rfc8628::auth::*};
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
 use url::Url;
@@ -34,15 +34,16 @@ fn main() {
     let tls = Tls::default();
     let mut client = Oauth20ClientStd::connect(token_uri, &tls, client_id.as_str()).unwrap();
 
-    // 1. device authorization request: obtain device and user codes
+    // NOTE: step 1, device authorization request: obtain the device
+    // and user codes
 
-    let params = Oauth20RequestDeviceAuthParams {
+    let params = Oauth20DeviceAuthRequestParams {
         client_id: client_id.as_str().into(),
         scope: scope.split_whitespace().map(Into::into).collect(),
     };
 
     let device = match client
-        .request_device_authorization(&device_auth_uri, params)
+        .request_device_auth(&device_auth_uri, params)
         .unwrap()
     {
         Ok(device) => device,
@@ -59,8 +60,8 @@ fn main() {
     }
     println!();
 
-    // 2. device access token request: poll the token endpoint until
-    // the user completes the flow
+    // NOTE: step 2, device access token request: poll the token
+    // endpoint until the user completes the flow
 
     match client.await_device_access_token(&tls, &device).unwrap() {
         Ok(res) => {

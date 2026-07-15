@@ -46,7 +46,7 @@ use url::Url;
     feature = "native-tls"
 ))]
 use crate::{
-    rfc6749::issue_access_token::Oauth20IssueAccessTokenErrorCode,
+    rfc6749::issue_access_token::Oauth20AccessTokenErrorCode,
     rfc8628::auth::Oauth20DeviceAuthSuccessParams,
 };
 use crate::{
@@ -68,28 +68,28 @@ pub enum Oauth20ClientStdError {
     Io(#[from] io::Error),
     /// The authorization code exchange failed.
     #[error(transparent)]
-    RequestAccessToken(#[from] Oauth20RequestAccessTokenError),
+    AccessTokenRequest(#[from] Oauth20AccessTokenRequestError),
     /// The token refresh failed.
     #[error(transparent)]
-    RefreshAccessToken(#[from] Oauth20RefreshAccessTokenError),
+    AccessTokenRefresh(#[from] Oauth20AccessTokenRefreshError),
     /// The client credentials exchange failed.
     #[error(transparent)]
-    RequestClientCredentials(#[from] Oauth20RequestClientCredentialsError),
+    ClientCredentialsRequest(#[from] Oauth20ClientCredentialsRequestError),
     /// The device authorization request failed.
     #[error(transparent)]
-    RequestDeviceAuth(#[from] Oauth20RequestDeviceAuthError),
+    DeviceAuthRequest(#[from] Oauth20DeviceAuthRequestError),
     /// A device access token poll failed.
     #[error(transparent)]
-    RequestDeviceAccessToken(#[from] Oauth20RequestDeviceAccessTokenError),
+    DeviceAccessTokenRequest(#[from] Oauth20DeviceAccessTokenRequestError),
     /// The device code expired before the user completed the flow.
     #[error("OAuth 2.0 device code expired before the user completed authorization")]
     DeviceCodeExpired,
     /// The client registration failed.
     #[error(transparent)]
-    RegisterClient(#[from] Oauth20RegisterClientError),
+    ClientRegister(#[from] Oauth20ClientRegisterError),
     /// The client registration params could not be serialized.
     #[error("Serialize OAuth 2.0 client registration params: {0}")]
-    SerializeRegisterClientParams(serde_json::Error),
+    SerializeClientRegisterParams(serde_json::Error),
     /// Opening the TCP/TLS connection failed.
     #[cfg(any(
         feature = "rustls-aws",
@@ -105,8 +105,13 @@ pub enum Oauth20ClientStdError {
     #[error("OAuth 2.0 URL `{0}` has no port")]
     UrlMissingPort(String),
     /// The endpoint URL scheme is neither `http` nor `https`.
-    #[error("OAuth 2.0 URL `{0}` has unsupported scheme `{1}` (expected `http` or `https`)")]
-    UrlUnsupportedScheme(String, String),
+    #[error("OAuth 2.0 URL `{url}` has unsupported scheme `{scheme}` (expected `http` or `https`)")]
+    UrlUnsupportedScheme {
+        /// The offending endpoint URL.
+        url: String,
+        /// The unsupported scheme it carries.
+        scheme: String,
+    },
     /// The redirect server received a malformed HTTP request.
     #[error("Malformed HTTP request received on redirect server: `{0}`")]
     InvalidRedirectRequest(String),
@@ -166,10 +171,10 @@ impl Oauth20ClientStd {
             }
             scheme if scheme.eq_ignore_ascii_case("http") => StreamStd::connect_tcp(host, port)?,
             scheme => {
-                return Err(Oauth20ClientStdError::UrlUnsupportedScheme(
-                    token_endpoint.to_string(),
-                    scheme.to_string(),
-                ));
+                return Err(Oauth20ClientStdError::UrlUnsupportedScheme {
+                    url: token_endpoint.to_string(),
+                    scheme: scheme.to_string(),
+                });
             }
         };
 
@@ -184,24 +189,24 @@ impl Oauth20ClientStd {
     /// Exchanges an authorization code for an access token.
     pub fn request_access_token(
         &mut self,
-        params: Oauth20RequestAccessTokenParams<'_>,
+        params: Oauth20AccessTokenRequestParams<'_>,
     ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
         let request = self.build_post_request(&self.token_endpoint);
-        let mut coroutine = Oauth20RequestAccessToken::new(request, params);
+        let mut coroutine = Oauth20AccessTokenRequest::new(request, params);
         let mut buf = [0u8; READ_BUFFER_SIZE];
         let mut arg: Option<&[u8]> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                Oauth20RequestAccessTokenResult::Ok(res) => return Ok(res),
-                Oauth20RequestAccessTokenResult::WantsRead => {
+                Oauth20AccessTokenRequestResult::Ok(res) => return Ok(res),
+                Oauth20AccessTokenRequestResult::WantsRead => {
                     let n = self.stream.read(&mut buf)?;
                     arg = Some(&buf[..n]);
                 }
-                Oauth20RequestAccessTokenResult::WantsWrite(bytes) => {
+                Oauth20AccessTokenRequestResult::WantsWrite(bytes) => {
                     self.stream.write_all(&bytes)?;
                 }
-                Oauth20RequestAccessTokenResult::Err(err) => return Err(err.into()),
+                Oauth20AccessTokenRequestResult::Err(err) => return Err(err.into()),
             }
         }
     }
@@ -209,24 +214,24 @@ impl Oauth20ClientStd {
     /// Refreshes an access token using a refresh token.
     pub fn refresh_access_token(
         &mut self,
-        params: Oauth20RefreshAccessTokenParams<'_>,
+        params: Oauth20AccessTokenRefreshParams<'_>,
     ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
         let request = self.build_post_request(&self.token_endpoint);
-        let mut coroutine = Oauth20RefreshAccessToken::new(request, params);
+        let mut coroutine = Oauth20AccessTokenRefresh::new(request, params);
         let mut buf = [0u8; READ_BUFFER_SIZE];
         let mut arg: Option<&[u8]> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                Oauth20RefreshAccessTokenResult::Ok(res) => return Ok(res),
-                Oauth20RefreshAccessTokenResult::WantsRead => {
+                Oauth20AccessTokenRefreshResult::Ok(res) => return Ok(res),
+                Oauth20AccessTokenRefreshResult::WantsRead => {
                     let n = self.stream.read(&mut buf)?;
                     arg = Some(&buf[..n]);
                 }
-                Oauth20RefreshAccessTokenResult::WantsWrite(bytes) => {
+                Oauth20AccessTokenRefreshResult::WantsWrite(bytes) => {
                     self.stream.write_all(&bytes)?;
                 }
-                Oauth20RefreshAccessTokenResult::Err(err) => return Err(err.into()),
+                Oauth20AccessTokenRefreshResult::Err(err) => return Err(err.into()),
             }
         }
     }
@@ -239,51 +244,51 @@ impl Oauth20ClientStd {
     /// token is issued; the caller repeats the request on expiry.
     pub fn request_client_credentials(
         &mut self,
-        params: Oauth20RequestClientCredentialsParams<'_>,
+        params: Oauth20ClientCredentialsRequestParams<'_>,
     ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
         let request = self.build_post_request(&self.token_endpoint);
-        let mut coroutine = Oauth20RequestClientCredentials::new(request, params);
+        let mut coroutine = Oauth20ClientCredentialsRequest::new(request, params);
         let mut buf = [0u8; READ_BUFFER_SIZE];
         let mut arg: Option<&[u8]> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                Oauth20RequestClientCredentialsResult::Ok(res) => return Ok(res),
-                Oauth20RequestClientCredentialsResult::WantsRead => {
+                Oauth20ClientCredentialsRequestResult::Ok(res) => return Ok(res),
+                Oauth20ClientCredentialsRequestResult::WantsRead => {
                     let n = self.stream.read(&mut buf)?;
                     arg = Some(&buf[..n]);
                 }
-                Oauth20RequestClientCredentialsResult::WantsWrite(bytes) => {
+                Oauth20ClientCredentialsRequestResult::WantsWrite(bytes) => {
                     self.stream.write_all(&bytes)?;
                 }
-                Oauth20RequestClientCredentialsResult::Err(err) => return Err(err.into()),
+                Oauth20ClientCredentialsRequestResult::Err(err) => return Err(err.into()),
             }
         }
     }
 
     /// Requests a device and user code pair from the device authorization
     /// endpoint (usually the token endpoint's host).
-    pub fn request_device_authorization(
+    pub fn request_device_auth(
         &mut self,
         endpoint: &Url,
-        params: Oauth20RequestDeviceAuthParams<'_>,
+        params: Oauth20DeviceAuthRequestParams<'_>,
     ) -> Result<Oauth20DeviceAuthResponse, Oauth20ClientStdError> {
         let request = self.build_post_request(endpoint);
-        let mut coroutine = Oauth20RequestDeviceAuth::new(request, params);
+        let mut coroutine = Oauth20DeviceAuthRequest::new(request, params);
         let mut buf = [0u8; READ_BUFFER_SIZE];
         let mut arg: Option<&[u8]> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                Oauth20RequestDeviceAuthResult::Ok(res) => return Ok(res),
-                Oauth20RequestDeviceAuthResult::WantsRead => {
+                Oauth20DeviceAuthRequestResult::Ok(res) => return Ok(res),
+                Oauth20DeviceAuthRequestResult::WantsRead => {
                     let n = self.stream.read(&mut buf)?;
                     arg = Some(&buf[..n]);
                 }
-                Oauth20RequestDeviceAuthResult::WantsWrite(bytes) => {
+                Oauth20DeviceAuthRequestResult::WantsWrite(bytes) => {
                     self.stream.write_all(&bytes)?;
                 }
-                Oauth20RequestDeviceAuthResult::Err(err) => return Err(err.into()),
+                Oauth20DeviceAuthRequestResult::Err(err) => return Err(err.into()),
             }
         }
     }
@@ -296,24 +301,24 @@ impl Oauth20ClientStd {
     /// over a fresh stream (see [`Self::await_device_access_token`]).
     pub fn request_device_access_token(
         &mut self,
-        params: Oauth20RequestDeviceAccessTokenParams<'_>,
+        params: Oauth20DeviceAccessTokenRequestParams<'_>,
     ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
         let request = self.build_post_request(&self.token_endpoint);
-        let mut coroutine = Oauth20RequestDeviceAccessToken::new(request, params);
+        let mut coroutine = Oauth20DeviceAccessTokenRequest::new(request, params);
         let mut buf = [0u8; READ_BUFFER_SIZE];
         let mut arg: Option<&[u8]> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                Oauth20RequestDeviceAccessTokenResult::Ok(res) => return Ok(res),
-                Oauth20RequestDeviceAccessTokenResult::WantsRead => {
+                Oauth20DeviceAccessTokenRequestResult::Ok(res) => return Ok(res),
+                Oauth20DeviceAccessTokenRequestResult::WantsRead => {
                     let n = self.stream.read(&mut buf)?;
                     arg = Some(&buf[..n]);
                 }
-                Oauth20RequestDeviceAccessTokenResult::WantsWrite(bytes) => {
+                Oauth20DeviceAccessTokenRequestResult::WantsWrite(bytes) => {
                     self.stream.write_all(&bytes)?;
                 }
-                Oauth20RequestDeviceAccessTokenResult::Err(err) => return Err(err.into()),
+                Oauth20DeviceAccessTokenRequestResult::Err(err) => return Err(err.into()),
             }
         }
     }
@@ -351,7 +356,7 @@ impl Oauth20ClientStd {
             self.stream =
                 Self::connect(self.token_endpoint.clone(), tls, self.client_id.clone())?.stream;
 
-            let params = Oauth20RequestDeviceAccessTokenParams {
+            let params = Oauth20DeviceAccessTokenRequestParams {
                 client_id: self.client_id.clone().into(),
                 device_code: device.device_code.clone(),
             };
@@ -359,8 +364,8 @@ impl Oauth20ClientStd {
             match self.request_device_access_token(params)? {
                 Ok(success) => return Ok(Ok(success)),
                 Err(err) => match err.error {
-                    Oauth20IssueAccessTokenErrorCode::AuthorizationPending => continue,
-                    Oauth20IssueAccessTokenErrorCode::SlowDown => {
+                    Oauth20AccessTokenErrorCode::AuthorizationPending => continue,
+                    Oauth20AccessTokenErrorCode::SlowDown => {
                         interval += Duration::from_secs(5);
                     }
                     _ => return Ok(Err(err)),
@@ -379,25 +384,25 @@ impl Oauth20ClientStd {
     pub fn register_client(
         &mut self,
         endpoint: &Url,
-        params: &Oauth20RegisterClientParams,
-    ) -> Result<Oauth20RegisterClientResponse, Oauth20ClientStdError> {
+        params: &Oauth20ClientRegisterParams,
+    ) -> Result<Oauth20ClientRegisterResponse, Oauth20ClientStdError> {
         let request = self.build_post_request(endpoint);
-        let mut coroutine = Oauth20RegisterClient::new(request, params)
-            .map_err(Oauth20ClientStdError::SerializeRegisterClientParams)?;
+        let mut coroutine = Oauth20ClientRegister::new(request, params)
+            .map_err(Oauth20ClientStdError::SerializeClientRegisterParams)?;
         let mut buf = [0u8; READ_BUFFER_SIZE];
         let mut arg: Option<&[u8]> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                Oauth20RegisterClientResult::Ok(res) => return Ok(res),
-                Oauth20RegisterClientResult::WantsRead => {
+                Oauth20ClientRegisterResult::Ok(res) => return Ok(res),
+                Oauth20ClientRegisterResult::WantsRead => {
                     let n = self.stream.read(&mut buf)?;
                     arg = Some(&buf[..n]);
                 }
-                Oauth20RegisterClientResult::WantsWrite(bytes) => {
+                Oauth20ClientRegisterResult::WantsWrite(bytes) => {
                     self.stream.write_all(&bytes)?;
                 }
-                Oauth20RegisterClientResult::Err(err) => return Err(err.into()),
+                Oauth20ClientRegisterResult::Err(err) => return Err(err.into()),
             }
         }
     }

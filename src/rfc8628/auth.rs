@@ -1,7 +1,10 @@
-//! Module dedicated to the sections 3.1 and 3.2: Device Authorization
-//! Request and Response.
+//! Device authorization request and response (RFC 8628 sections 3.1
+//! and 3.2).
 //!
-//! Refs: <https://datatracker.ietf.org/doc/html/rfc8628#section-3.1>
+//! Requests a device and user code pair from the device authorization
+//! endpoint. On success the client shows the user code and
+//! verification URI, then polls the token endpoint (see the token
+//! sibling module).
 //!
 //! # Example
 //!
@@ -12,9 +15,7 @@
 //! };
 //!
 //! use io_http::rfc9110::request::HttpRequest;
-//! use io_oauth::rfc8628::auth::{
-//!     Oauth20RequestDeviceAuth, Oauth20RequestDeviceAuthParams, Oauth20RequestDeviceAuthResult,
-//! };
+//! use io_oauth::rfc8628::auth::*;
 //! use url::Url;
 //!
 //! let device_url = Url::parse("https://example.com/devicecode").unwrap();
@@ -26,27 +27,27 @@
 //! }
 //! .header("Host", device_url.host_str().unwrap());
 //!
-//! let params = Oauth20RequestDeviceAuthParams {
+//! let params = Oauth20DeviceAuthRequestParams {
 //!     client_id: "client-id".into(),
 //!     scope: Default::default(),
 //! };
 //!
 //! let mut stream = TcpStream::connect("example.com:443").unwrap();
-//! let mut coroutine = Oauth20RequestDeviceAuth::new(request, params);
+//! let mut coroutine = Oauth20DeviceAuthRequest::new(request, params);
 //! let mut arg: Option<&[u8]> = None;
 //! let mut buf = [0u8; 4096];
 //!
 //! let response = loop {
 //!     match coroutine.resume(arg.take()) {
-//!         Oauth20RequestDeviceAuthResult::Ok(res) => break res,
-//!         Oauth20RequestDeviceAuthResult::WantsRead => {
+//!         Oauth20DeviceAuthRequestResult::Ok(res) => break res,
+//!         Oauth20DeviceAuthRequestResult::WantsRead => {
 //!             let n = stream.read(&mut buf).unwrap();
 //!             arg = Some(&buf[..n]);
 //!         }
-//!         Oauth20RequestDeviceAuthResult::WantsWrite(bytes) => {
+//!         Oauth20DeviceAuthRequestResult::WantsWrite(bytes) => {
 //!             stream.write_all(&bytes).unwrap();
 //!         }
-//!         Oauth20RequestDeviceAuthResult::Err(err) => panic!("{err}"),
+//!         Oauth20DeviceAuthRequestResult::Err(err) => panic!("{err}"),
 //!     }
 //! };
 //! # let _ = response;
@@ -69,22 +70,23 @@ use io_http::{
     },
     rfc9112::send::{Http11Send, Http11SendError},
 };
+use log::{debug, trace};
 use secrecy::SecretString;
 use serde::Deserialize;
 use thiserror::Error;
 use url::{Url, form_urlencoded::Serializer};
 
-use crate::rfc6749::issue_access_token::Oauth20IssueAccessTokenErrorParams;
+use crate::rfc6749::issue_access_token::Oauth20AccessTokenErrorParams;
 
 /// The device authorization response: success params, or error params.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc8628#section-3.2>
 pub type Oauth20DeviceAuthResponse =
-    Result<Oauth20DeviceAuthSuccessParams, Oauth20IssueAccessTokenErrorParams>;
+    Result<Oauth20DeviceAuthSuccessParams, Oauth20AccessTokenErrorParams>;
 
 /// Errors that can occur during the coroutine progression.
 #[derive(Debug, Error)]
-pub enum Oauth20RequestDeviceAuthError {
+pub enum Oauth20DeviceAuthRequestError {
     /// The HTTP request could not be sent.
     #[error(transparent)]
     SendHttpRequest(#[from] Http11SendError),
@@ -103,7 +105,7 @@ pub enum Oauth20RequestDeviceAuthError {
 
 /// Result returned by the coroutine's resume function.
 #[derive(Debug)]
-pub enum Oauth20RequestDeviceAuthResult {
+pub enum Oauth20DeviceAuthRequestResult {
     /// The coroutine has successfully terminated its execution.
     Ok(Oauth20DeviceAuthResponse),
     /// The coroutine wants the socket to be read into.
@@ -111,7 +113,7 @@ pub enum Oauth20RequestDeviceAuthResult {
     /// The coroutine wants the given bytes to be written to the socket.
     WantsWrite(Vec<u8>),
     /// The coroutine encountered an error.
-    Err(Oauth20RequestDeviceAuthError),
+    Err(Oauth20DeviceAuthRequestError),
 }
 
 /// The I/O-free coroutine to request a device and user code pair.
@@ -120,13 +122,16 @@ pub enum Oauth20RequestDeviceAuthResult {
 /// the token endpoint with the device code.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc8628#section-3.1>
-pub struct Oauth20RequestDeviceAuth {
+pub struct Oauth20DeviceAuthRequest {
     send: Http11Send,
 }
 
-impl Oauth20RequestDeviceAuth {
+impl Oauth20DeviceAuthRequest {
     /// Creates the coroutine to request a device and user code pair.
-    pub fn new(request: HttpRequest, body: Oauth20RequestDeviceAuthParams<'_>) -> Self {
+    pub fn new(request: HttpRequest, body: Oauth20DeviceAuthRequestParams<'_>) -> Self {
+        debug!("prepare device authorization request");
+        trace!("url: {}", request.url);
+
         let request = request
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body.to_string().into_bytes());
@@ -137,36 +142,42 @@ impl Oauth20RequestDeviceAuth {
     }
 
     /// Makes the coroutine progress.
-    pub fn resume(&mut self, arg: Option<&[u8]>) -> Oauth20RequestDeviceAuthResult {
+    pub fn resume(&mut self, arg: Option<&[u8]>) -> Oauth20DeviceAuthRequestResult {
         match self.send.resume(arg) {
             HttpCoroutineState::Complete(Ok(HttpSendOutput { response, .. }))
                 if response.status.is_success() =>
             {
+                debug!("received device authorization response");
+                trace!("status: {}", *response.status);
+
                 match Oauth20DeviceAuthSuccessParams::try_from(response.body.as_slice()) {
-                    Ok(res) => Oauth20RequestDeviceAuthResult::Ok(Ok(res)),
-                    Err(err) => Oauth20RequestDeviceAuthResult::Err(err.into()),
+                    Ok(res) => Oauth20DeviceAuthRequestResult::Ok(Ok(res)),
+                    Err(err) => Oauth20DeviceAuthRequestResult::Err(err.into()),
                 }
             }
             HttpCoroutineState::Complete(Ok(HttpSendOutput { response, .. })) => {
-                match Oauth20IssueAccessTokenErrorParams::try_from(response.body.as_slice()) {
-                    Ok(res) => Oauth20RequestDeviceAuthResult::Ok(Err(res)),
-                    Err(err) => Oauth20RequestDeviceAuthResult::Err(err.into()),
+                debug!("received device authorization error response");
+                trace!("status: {}", *response.status);
+
+                match Oauth20AccessTokenErrorParams::try_from(response.body.as_slice()) {
+                    Ok(res) => Oauth20DeviceAuthRequestResult::Ok(Err(res)),
+                    Err(err) => Oauth20DeviceAuthRequestResult::Err(err.into()),
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
-                Oauth20RequestDeviceAuthResult::WantsRead
+                Oauth20DeviceAuthRequestResult::WantsRead
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsWrite(bytes)) => {
-                Oauth20RequestDeviceAuthResult::WantsWrite(bytes)
+                Oauth20DeviceAuthRequestResult::WantsWrite(bytes)
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRedirect { url, response, .. }) => {
-                Oauth20RequestDeviceAuthResult::Err(Oauth20RequestDeviceAuthError::Redirect {
+                Oauth20DeviceAuthRequestResult::Err(Oauth20DeviceAuthRequestError::Redirect {
                     url,
                     code: *response.status,
                 })
             }
             HttpCoroutineState::Complete(Err(err)) => {
-                Oauth20RequestDeviceAuthResult::Err(err.into())
+                Oauth20DeviceAuthRequestResult::Err(err.into())
             }
         }
     }
@@ -207,7 +218,7 @@ impl TryFrom<&[u8]> for Oauth20DeviceAuthSuccessParams {
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc8628#section-3.1>
 #[derive(Debug)]
-pub struct Oauth20RequestDeviceAuthParams<'a> {
+pub struct Oauth20DeviceAuthRequestParams<'a> {
     /// The client identifier.
     ///
     /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-2.2>
@@ -218,7 +229,7 @@ pub struct Oauth20RequestDeviceAuthParams<'a> {
     pub scope: BTreeSet<Cow<'a, str>>,
 }
 
-impl<'a> Oauth20RequestDeviceAuthParams<'a> {
+impl<'a> Oauth20DeviceAuthRequestParams<'a> {
     /// Serializes the params into the form-urlencoded request body.
     pub fn to_serializer(&self) -> Serializer<'a, String> {
         let mut serializer = Serializer::new(String::new());
@@ -242,7 +253,7 @@ impl<'a> Oauth20RequestDeviceAuthParams<'a> {
     }
 }
 
-impl fmt::Display for Oauth20RequestDeviceAuthParams<'_> {
+impl fmt::Display for Oauth20DeviceAuthRequestParams<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_serializer().finish())
     }

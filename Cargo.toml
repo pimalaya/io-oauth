@@ -1,13 +1,13 @@
 [package]
 name = "io-oauth"
-description = "OAuth client library"
+description = "OAuth client library for Rust"
 version = "0.1.0"
-authors = ["soywod <clement.douin@posteo.net>"]
+authors = ["soywod <pimalaya.org@posteo.net>"]
 rust-version = "1.88"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-categories = ["api-bindings"]
-keywords = ["io-free", "coroutine", "oauth", "rfc6749", "rfc7636"]
+categories = ["api-bindings", "no-std"]
+keywords = ["io-free", "no-std", "coroutine", "oauth", "pkce"]
 homepage = "https://pimalaya.org"
 documentation = "https://docs.rs/io-oauth/latest/io_oauth"
 repository = "https://github.com/pimalaya/io-oauth"
@@ -25,12 +25,12 @@ rustls-ring = ["client", "dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pim
 vendored = ["pimalaya-stream?/vendored", "io-http/vendored"]
 
 [[example]]
-name = "auth-code-grant"
+name = "auth_code_grant"
 path = "examples/auth_code_grant.rs"
 required-features = ["client"]
 
 [[example]]
-name = "device-auth-grant"
+name = "device_auth_grant"
 path = "examples/device_auth_grant.rs"
 required-features = ["rustls-ring"]
 
@@ -42,9 +42,9 @@ rustls-platform-verifier = "0.7"
 [dependencies]
 anyhow = { version = "1", default-features = false, optional = true }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
-io-http = { version = "0.2", default-features = false }
+io-http = { version = "0.3", default-features = false }
 log = { version = "0.4", default-features = false }
-pimalaya-stream = { version = "0.0.1", default-features = false, optional = true }
+pimalaya-stream = { version = "0.1", default-features = false, optional = true }
 rand = { version = "0.10", default-features = false, optional = true }
 secrecy = { version = "0.10", default-features = false, features = ["serde"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }

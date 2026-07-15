@@ -1,6 +1,7 @@
-//! Module dedicated to the section 4.1.2: Authorization Response.
+//! Authorization response (RFC 6749 section 4.1.2).
 //!
-//! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2>
+//! Parses the redirected URL back into an authorization code or an
+//! error, and validates the echoed CSRF state.
 
 use core::fmt;
 

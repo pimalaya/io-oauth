@@ -1,6 +1,8 @@
-//! Proof Key for Code Exchange by OAuth Public Clients.
+//! Proof key for code exchange (RFC 7636).
 //!
-//! Refs: <https://datatracker.ietf.org/doc/html/rfc7636>
+//! The code verifier and derived code challenge hardening the
+//! authorization code grant for public clients: the challenge rides
+//! on the authorization request, the verifier on the token exchange.
 
 use core::str::FromStr;
 

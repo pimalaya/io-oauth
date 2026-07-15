@@ -1,6 +1,9 @@
-//! Module dedicated to OAuth 2.0 Dynamic Client Registration.
+//! Client registration request and response (RFC 7591 section 3).
 //!
-//! Refs: <https://datatracker.ietf.org/doc/html/rfc7591>
+//! Registers a client dynamically against the registration endpoint
+//! advertised by the RFC 8414 server metadata, sparing any provider
+//! console: a public client registers with the none token endpoint
+//! auth method and needs no secret.
 //!
 //! # Example
 //!
@@ -11,9 +14,7 @@
 //! };
 //!
 //! use io_http::rfc9110::request::HttpRequest;
-//! use io_oauth::rfc7591::register::{
-//!     Oauth20RegisterClient, Oauth20RegisterClientParams, Oauth20RegisterClientResult,
-//! };
+//! use io_oauth::rfc7591::register::*;
 //! use url::Url;
 //!
 //! let registration_url = Url::parse("https://example.com/register").unwrap();
@@ -25,7 +26,7 @@
 //! }
 //! .header("Host", registration_url.host_str().unwrap());
 //!
-//! let params = Oauth20RegisterClientParams {
+//! let params = Oauth20ClientRegisterParams {
 //!     client_name: Some("My App".into()),
 //!     redirect_uris: vec!["http://127.0.0.1/redirect".into()],
 //!     token_endpoint_auth_method: Some("none".into()),
@@ -33,21 +34,21 @@
 //! };
 //!
 //! let mut stream = TcpStream::connect("example.com:443").unwrap();
-//! let mut coroutine = Oauth20RegisterClient::new(request, &params).unwrap();
+//! let mut coroutine = Oauth20ClientRegister::new(request, &params).unwrap();
 //! let mut arg: Option<&[u8]> = None;
 //! let mut buf = [0u8; 4096];
 //!
 //! let response = loop {
 //!     match coroutine.resume(arg.take()) {
-//!         Oauth20RegisterClientResult::Ok(res) => break res,
-//!         Oauth20RegisterClientResult::WantsRead => {
+//!         Oauth20ClientRegisterResult::Ok(res) => break res,
+//!         Oauth20ClientRegisterResult::WantsRead => {
 //!             let n = stream.read(&mut buf).unwrap();
 //!             arg = Some(&buf[..n]);
 //!         }
-//!         Oauth20RegisterClientResult::WantsWrite(bytes) => {
+//!         Oauth20ClientRegisterResult::WantsWrite(bytes) => {
 //!             stream.write_all(&bytes).unwrap();
 //!         }
-//!         Oauth20RegisterClientResult::Err(err) => panic!("{err}"),
+//!         Oauth20ClientRegisterResult::Err(err) => panic!("{err}"),
 //!     }
 //! };
 //! # let _ = response;
@@ -63,6 +64,7 @@ use io_http::{
     },
     rfc9112::send::{Http11Send, Http11SendError},
 };
+use log::{debug, trace};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -71,14 +73,14 @@ use url::Url;
 /// The registration response: client information, or error params.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc7591#section-3.2>
-pub type Oauth20RegisterClientResponse =
-    Result<Oauth20ClientInformation, Oauth20RegisterClientErrorParams>;
+pub type Oauth20ClientRegisterResponse =
+    Result<Oauth20ClientInformation, Oauth20ClientRegisterErrorParams>;
 
 /// The client metadata sent to the registration endpoint.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc7591#section-2>
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct Oauth20RegisterClientParams {
+pub struct Oauth20ClientRegisterParams {
     /// The redirection URIs the client will use in authorization requests.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub redirect_uris: Vec<String>,
@@ -156,16 +158,16 @@ impl TryFrom<&[u8]> for Oauth20ClientInformation {
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc7591#section-3.2.2>
 #[derive(Clone, Debug, Deserialize)]
-pub struct Oauth20RegisterClientErrorParams {
+pub struct Oauth20ClientRegisterErrorParams {
     /// A single ASCII error code.
-    pub error: Oauth20RegisterClientErrorCode,
+    pub error: Oauth20ClientRegisterErrorCode,
     /// Human-readable ASCII text providing additional information about the
     /// rejected registration.
     pub error_description: Option<String>,
 }
 
 /// Parses error params from JSON bytes.
-impl TryFrom<&[u8]> for Oauth20RegisterClientErrorParams {
+impl TryFrom<&[u8]> for Oauth20ClientRegisterErrorParams {
     type Error = serde_json::Error;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
@@ -173,10 +175,10 @@ impl TryFrom<&[u8]> for Oauth20RegisterClientErrorParams {
     }
 }
 
-/// The error code of the [`Oauth20RegisterClientErrorParams`].
+/// The error code of the [`Oauth20ClientRegisterErrorParams`].
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Oauth20RegisterClientErrorCode {
+pub enum Oauth20ClientRegisterErrorCode {
     /// The value of one or more redirection URIs is invalid.
     InvalidRedirectUri,
     /// The value of one of the client metadata fields is invalid and the server
@@ -194,7 +196,7 @@ pub enum Oauth20RegisterClientErrorCode {
 
 /// Errors that can occur during the coroutine progression.
 #[derive(Debug, Error)]
-pub enum Oauth20RegisterClientError {
+pub enum Oauth20ClientRegisterError {
     /// The HTTP request could not be sent.
     #[error(transparent)]
     SendHttpRegister(#[from] Http11SendError),
@@ -213,15 +215,15 @@ pub enum Oauth20RegisterClientError {
 
 /// Result returned by the coroutine's resume function.
 #[derive(Debug)]
-pub enum Oauth20RegisterClientResult {
+pub enum Oauth20ClientRegisterResult {
     /// The coroutine has successfully terminated its execution.
-    Ok(Oauth20RegisterClientResponse),
+    Ok(Oauth20ClientRegisterResponse),
     /// The coroutine wants the socket to be read into.
     WantsRead,
     /// The coroutine wants the given bytes to be written to the socket.
     WantsWrite(Vec<u8>),
     /// The coroutine encountered an error.
-    Err(Oauth20RegisterClientError),
+    Err(Oauth20ClientRegisterError),
 }
 
 /// The I/O-free coroutine to register a client dynamically.
@@ -231,16 +233,19 @@ pub enum Oauth20RegisterClientResult {
 /// client information or an error response. A public client registers with
 /// `token_endpoint_auth_method: none` and needs no secret nor any provider
 /// console.
-pub struct Oauth20RegisterClient {
+pub struct Oauth20ClientRegister {
     send: Http11Send,
 }
 
-impl Oauth20RegisterClient {
+impl Oauth20ClientRegister {
     /// Creates a new I/O-free coroutine to register a client.
     pub fn new(
         request: HttpRequest,
-        params: &Oauth20RegisterClientParams,
+        params: &Oauth20ClientRegisterParams,
     ) -> Result<Self, serde_json::Error> {
+        debug!("prepare client registration request");
+        trace!("url: {}", request.url);
+
         let request = request
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
@@ -252,35 +257,41 @@ impl Oauth20RegisterClient {
     }
 
     /// Makes the coroutine progress.
-    pub fn resume(&mut self, arg: Option<&[u8]>) -> Oauth20RegisterClientResult {
+    pub fn resume(&mut self, arg: Option<&[u8]>) -> Oauth20ClientRegisterResult {
         match self.send.resume(arg) {
             HttpCoroutineState::Complete(Ok(HttpSendOutput { response, .. }))
                 if response.status.is_success() =>
             {
+                debug!("received client registration response");
+                trace!("status: {}", *response.status);
+
                 match Oauth20ClientInformation::try_from(response.body.as_slice()) {
-                    Ok(client) => Oauth20RegisterClientResult::Ok(Ok(client)),
-                    Err(err) => Oauth20RegisterClientResult::Err(err.into()),
+                    Ok(client) => Oauth20ClientRegisterResult::Ok(Ok(client)),
+                    Err(err) => Oauth20ClientRegisterResult::Err(err.into()),
                 }
             }
             HttpCoroutineState::Complete(Ok(HttpSendOutput { response, .. })) => {
-                match Oauth20RegisterClientErrorParams::try_from(response.body.as_slice()) {
-                    Ok(err) => Oauth20RegisterClientResult::Ok(Err(err)),
-                    Err(err) => Oauth20RegisterClientResult::Err(err.into()),
+                debug!("received client registration error response");
+                trace!("status: {}", *response.status);
+
+                match Oauth20ClientRegisterErrorParams::try_from(response.body.as_slice()) {
+                    Ok(err) => Oauth20ClientRegisterResult::Ok(Err(err)),
+                    Err(err) => Oauth20ClientRegisterResult::Err(err.into()),
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
-                Oauth20RegisterClientResult::WantsRead
+                Oauth20ClientRegisterResult::WantsRead
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsWrite(bytes)) => {
-                Oauth20RegisterClientResult::WantsWrite(bytes)
+                Oauth20ClientRegisterResult::WantsWrite(bytes)
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRedirect { url, response, .. }) => {
-                Oauth20RegisterClientResult::Err(Oauth20RegisterClientError::Redirect {
+                Oauth20ClientRegisterResult::Err(Oauth20ClientRegisterError::Redirect {
                     url,
                     code: *response.status,
                 })
             }
-            HttpCoroutineState::Complete(Err(err)) => Oauth20RegisterClientResult::Err(err.into()),
+            HttpCoroutineState::Complete(Err(err)) => Oauth20ClientRegisterResult::Err(err.into()),
         }
     }
 }
@@ -289,14 +300,11 @@ impl Oauth20RegisterClient {
 mod tests {
     use alloc::{string::String, vec};
 
-    use crate::rfc7591::register::{
-        Oauth20ClientInformation, Oauth20RegisterClientErrorCode, Oauth20RegisterClientErrorParams,
-        Oauth20RegisterClientParams,
-    };
+    use crate::rfc7591::register::*;
 
     #[test]
     fn params_serialize_without_empty_fields() {
-        let params = Oauth20RegisterClientParams {
+        let params = Oauth20ClientRegisterParams {
             redirect_uris: vec![String::from("http://127.0.0.1/redirect")],
             token_endpoint_auth_method: Some(String::from("none")),
             grant_types: vec![
@@ -322,14 +330,14 @@ mod tests {
 
         let rejected =
             br#"{"error": "invalid_redirect_uri", "error_description": "loopback only"}"#;
-        let err = Oauth20RegisterClientErrorParams::try_from(rejected.as_slice()).unwrap();
+        let err = Oauth20ClientRegisterErrorParams::try_from(rejected.as_slice()).unwrap();
         assert_eq!(
             err.error,
-            Oauth20RegisterClientErrorCode::InvalidRedirectUri
+            Oauth20ClientRegisterErrorCode::InvalidRedirectUri
         );
 
         let unknown = br#"{"error": "not_in_the_registry"}"#;
-        let err = Oauth20RegisterClientErrorParams::try_from(unknown.as_slice()).unwrap();
-        assert_eq!(err.error, Oauth20RegisterClientErrorCode::Unknown);
+        let err = Oauth20ClientRegisterErrorParams::try_from(unknown.as_slice()).unwrap();
+        assert_eq!(err.error, Oauth20ClientRegisterErrorCode::Unknown);
     }
 }

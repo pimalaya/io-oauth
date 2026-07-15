@@ -1,6 +1,8 @@
-//! Opaque state value used for CSRF protection (section 10.12).
+//! Opaque state value used for CSRF protection (RFC 6749 section
+//! 10.12).
 //!
-//! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-10.12>
+//! Sent on the authorization request and echoed back on the callback,
+//! binding the two legs of the authorization code grant together.
 
 use core::fmt;
 
@@ -16,7 +18,7 @@ use serde::{
     de::{Error, Visitor},
 };
 
-// VSCHAR = %x20-7E
+// NOTE: VSCHAR = %x20-7E
 const VSCHAR: [u8; 95] = [
     0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
     0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,

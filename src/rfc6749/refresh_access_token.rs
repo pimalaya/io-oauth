@@ -1,6 +1,7 @@
-//! Module dedicated to the section 6: Refreshing an Access Token.
+//! Access token refresh (RFC 6749 section 6).
 //!
-//! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-6>
+//! Trades a refresh token for a fresh access token against the token
+//! endpoint, whatever grant issued the refresh token.
 //!
 //! # Example
 //!
@@ -11,10 +12,7 @@
 //! };
 //!
 //! use io_http::rfc9110::request::HttpRequest;
-//! use io_oauth::rfc6749::refresh_access_token::{
-//!     Oauth20RefreshAccessToken, Oauth20RefreshAccessTokenParams,
-//!     Oauth20RefreshAccessTokenResult,
-//! };
+//! use io_oauth::rfc6749::refresh_access_token::*;
 //! use url::Url;
 //!
 //! let token_url = Url::parse("https://example.com/token").unwrap();
@@ -26,24 +24,24 @@
 //! }
 //! .header("Host", token_url.host_str().unwrap());
 //!
-//! let params = Oauth20RefreshAccessTokenParams::new("client-id", "the-refresh-token");
+//! let params = Oauth20AccessTokenRefreshParams::new("client-id", "the-refresh-token");
 //!
 //! let mut stream = TcpStream::connect("example.com:443").unwrap();
-//! let mut coroutine = Oauth20RefreshAccessToken::new(request, params);
+//! let mut coroutine = Oauth20AccessTokenRefresh::new(request, params);
 //! let mut arg: Option<&[u8]> = None;
 //! let mut buf = [0u8; 4096];
 //!
 //! let response = loop {
 //!     match coroutine.resume(arg.take()) {
-//!         Oauth20RefreshAccessTokenResult::Ok(res) => break res,
-//!         Oauth20RefreshAccessTokenResult::WantsRead => {
+//!         Oauth20AccessTokenRefreshResult::Ok(res) => break res,
+//!         Oauth20AccessTokenRefreshResult::WantsRead => {
 //!             let n = stream.read(&mut buf).unwrap();
 //!             arg = Some(&buf[..n]);
 //!         }
-//!         Oauth20RefreshAccessTokenResult::WantsWrite(bytes) => {
+//!         Oauth20AccessTokenRefreshResult::WantsWrite(bytes) => {
 //!             stream.write_all(&bytes).unwrap();
 //!         }
-//!         Oauth20RefreshAccessTokenResult::Err(err) => panic!("{err}"),
+//!         Oauth20AccessTokenRefreshResult::Err(err) => panic!("{err}"),
 //!     }
 //! };
 //! # let _ = response;
@@ -66,18 +64,19 @@ use io_http::{
     },
     rfc9112::send::{Http11Send, Http11SendError},
 };
+use log::{debug, trace};
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use url::{Url, form_urlencoded::Serializer};
 
 use crate::rfc6749::issue_access_token::{
-    Oauth20AccessTokenResponse, Oauth20IssueAccessTokenErrorParams,
-    Oauth20IssueAccessTokenSuccessParams, parse_http_date,
+    Oauth20AccessTokenErrorParams, Oauth20AccessTokenResponse, Oauth20AccessTokenSuccessParams,
+    parse_http_date,
 };
 
 /// Errors that can occur during the coroutine progression.
 #[derive(Debug, Error)]
-pub enum Oauth20RefreshAccessTokenError {
+pub enum Oauth20AccessTokenRefreshError {
     /// The HTTP request could not be sent.
     #[error(transparent)]
     SendHttpRefresh(#[from] Http11SendError),
@@ -96,7 +95,7 @@ pub enum Oauth20RefreshAccessTokenError {
 
 /// Result returned by the coroutine's resume function.
 #[derive(Debug)]
-pub enum Oauth20RefreshAccessTokenResult {
+pub enum Oauth20AccessTokenRefreshResult {
     /// The coroutine has successfully terminated its execution.
     Ok(Oauth20AccessTokenResponse),
     /// The coroutine wants the socket to be read into.
@@ -104,19 +103,22 @@ pub enum Oauth20RefreshAccessTokenResult {
     /// The coroutine wants the given bytes to be written to the socket.
     WantsWrite(Vec<u8>),
     /// The coroutine encountered an error.
-    Err(Oauth20RefreshAccessTokenError),
+    Err(Oauth20AccessTokenRefreshError),
 }
 
 /// The I/O-free coroutine to refresh an access token.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-6>
-pub struct Oauth20RefreshAccessToken {
+pub struct Oauth20AccessTokenRefresh {
     send: Http11Send,
 }
 
-impl Oauth20RefreshAccessToken {
+impl Oauth20AccessTokenRefresh {
     /// Creates a new I/O-free coroutine to refresh an access token.
-    pub fn new(request: HttpRequest, body: Oauth20RefreshAccessTokenParams<'_>) -> Self {
+    pub fn new(request: HttpRequest, body: Oauth20AccessTokenRefreshParams<'_>) -> Self {
+        debug!("prepare access token refresh request");
+        trace!("url: {}", request.url);
+
         let request = request
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body.to_string().into_bytes());
@@ -127,39 +129,45 @@ impl Oauth20RefreshAccessToken {
     }
 
     /// Makes the coroutine progress.
-    pub fn resume(&mut self, arg: Option<&[u8]>) -> Oauth20RefreshAccessTokenResult {
+    pub fn resume(&mut self, arg: Option<&[u8]>) -> Oauth20AccessTokenRefreshResult {
         match self.send.resume(arg) {
             HttpCoroutineState::Complete(Ok(HttpSendOutput { response, .. }))
                 if response.status.is_success() =>
             {
-                match Oauth20IssueAccessTokenSuccessParams::try_from(response.body.as_slice()) {
+                debug!("received access token refresh response");
+                trace!("status: {}", *response.status);
+
+                match Oauth20AccessTokenSuccessParams::try_from(response.body.as_slice()) {
                     Ok(mut res) => {
                         res.issued_at = response.header("date").and_then(parse_http_date);
-                        Oauth20RefreshAccessTokenResult::Ok(Ok(res))
+                        Oauth20AccessTokenRefreshResult::Ok(Ok(res))
                     }
-                    Err(err) => Oauth20RefreshAccessTokenResult::Err(err.into()),
+                    Err(err) => Oauth20AccessTokenRefreshResult::Err(err.into()),
                 }
             }
             HttpCoroutineState::Complete(Ok(HttpSendOutput { response, .. })) => {
-                match Oauth20IssueAccessTokenErrorParams::try_from(response.body.as_slice()) {
-                    Ok(res) => Oauth20RefreshAccessTokenResult::Ok(Err(res)),
-                    Err(err) => Oauth20RefreshAccessTokenResult::Err(err.into()),
+                debug!("received access token refresh error response");
+                trace!("status: {}", *response.status);
+
+                match Oauth20AccessTokenErrorParams::try_from(response.body.as_slice()) {
+                    Ok(res) => Oauth20AccessTokenRefreshResult::Ok(Err(res)),
+                    Err(err) => Oauth20AccessTokenRefreshResult::Err(err.into()),
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
-                Oauth20RefreshAccessTokenResult::WantsRead
+                Oauth20AccessTokenRefreshResult::WantsRead
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsWrite(bytes)) => {
-                Oauth20RefreshAccessTokenResult::WantsWrite(bytes)
+                Oauth20AccessTokenRefreshResult::WantsWrite(bytes)
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRedirect { url, response, .. }) => {
-                Oauth20RefreshAccessTokenResult::Err(Oauth20RefreshAccessTokenError::Redirect {
+                Oauth20AccessTokenRefreshResult::Err(Oauth20AccessTokenRefreshError::Redirect {
                     url,
                     code: *response.status,
                 })
             }
             HttpCoroutineState::Complete(Err(err)) => {
-                Oauth20RefreshAccessTokenResult::Err(err.into())
+                Oauth20AccessTokenRefreshResult::Err(err.into())
             }
         }
     }
@@ -169,7 +177,7 @@ impl Oauth20RefreshAccessToken {
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-6>
 #[derive(Debug)]
-pub struct Oauth20RefreshAccessTokenParams<'a> {
+pub struct Oauth20AccessTokenRefreshParams<'a> {
     /// The client identifier.
     ///
     /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-2.2>
@@ -186,7 +194,7 @@ pub struct Oauth20RefreshAccessTokenParams<'a> {
     pub scopes: BTreeSet<Cow<'a, str>>,
 }
 
-impl<'a> Oauth20RefreshAccessTokenParams<'a> {
+impl<'a> Oauth20AccessTokenRefreshParams<'a> {
     /// Builds params from a client id and refresh token, no secret nor scope.
     pub fn new(client_id: impl ToString, refresh_token: impl Into<SecretString>) -> Self {
         Self {
@@ -227,7 +235,7 @@ impl<'a> Oauth20RefreshAccessTokenParams<'a> {
     }
 }
 
-impl fmt::Display for Oauth20RefreshAccessTokenParams<'_> {
+impl fmt::Display for Oauth20AccessTokenRefreshParams<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_serializer().finish())
     }

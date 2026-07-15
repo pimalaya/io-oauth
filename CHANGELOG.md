@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Moved the std client (and `await_redirect`) from `rfc6749::client` to the crate-root `client` module, since it spans the RFC modules (token operations, device grant, dynamic client registration) rather than belonging to RFC 6749. `Oauth20ClientStd` keeps its version-scoped name and version-less methods; a future OAuth version would add its own client alongside, unified behind a version-agnostic wrapper only once one exists.
+- Renamed every coroutine family from verb-first to target-first, following the naming canon.
+
+  `Oauth20RequestAccessToken*` is now `Oauth20AccessTokenRequest*`, `Oauth20RefreshAccessToken*` is now `Oauth20AccessTokenRefresh*`, `Oauth20RequestClientCredentials*` is now `Oauth20ClientCredentialsRequest*`, `Oauth20RequestDeviceAuth*` is now `Oauth20DeviceAuthRequest*`, `Oauth20RequestDeviceAccessToken*` is now `Oauth20DeviceAccessTokenRequest*` and `Oauth20RegisterClient*` is now `Oauth20ClientRegister*`, each with its `Params`, `Result`, `Error`, `Response`, `ErrorParams` and `ErrorCode` companions when they exist.
+
+- Renamed the token issuance data objects, dropping the verb since they are spec-defined wire shapes shared by every token-issuing coroutine rather than companions of a single one: `Oauth20IssueAccessTokenSuccessParams` is now `Oauth20AccessTokenSuccessParams`, `Oauth20IssueAccessTokenErrorParams` is now `Oauth20AccessTokenErrorParams` and `Oauth20IssueAccessTokenErrorCode` is now `Oauth20AccessTokenErrorCode`.
+- Renamed `Oauth20ClientStd::request_device_authorization` to `request_device_auth`, since identifiers shorten authorization to auth.
+- Changed the `Oauth20ClientStdError` variants to mirror the renamed coroutines (`AccessTokenRequest`, `AccessTokenRefresh`, `ClientCredentialsRequest`, `DeviceAuthRequest`, `DeviceAccessTokenRequest`, `ClientRegister`, `SerializeClientRegisterParams`), and made `UrlUnsupportedScheme` a struct variant carrying the `url` and `scheme` fields.
+- Renamed the cargo examples from kebab-case to snake_case: `auth_code_grant` and `device_auth_grant`.
+- Bumped io-http to 0.3 and pimalaya-stream to 0.1.
 
 ## [0.1.0] - 2026-07-13
 

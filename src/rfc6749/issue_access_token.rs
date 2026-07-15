@@ -1,6 +1,9 @@
-//! Module dedicated to the section 5: Issuing an Access Token.
+//! Access token issuance (RFC 6749 section 5).
 //!
-//! Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-5>
+//! The token endpoint response shared by every grant: the issued
+//! token params on success, the error params otherwise. Consumed by
+//! the access token request, refresh, client credentials and device
+//! grant coroutines.
 
 use alloc::string::String;
 
@@ -11,13 +14,13 @@ use serde::{Deserialize, Serialize, Serializer};
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-5>
 pub type Oauth20AccessTokenResponse =
-    Result<Oauth20IssueAccessTokenSuccessParams, Oauth20IssueAccessTokenErrorParams>;
+    Result<Oauth20AccessTokenSuccessParams, Oauth20AccessTokenErrorParams>;
 
 /// The successful access token response.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-5.1>
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Oauth20IssueAccessTokenSuccessParams {
+pub struct Oauth20AccessTokenSuccessParams {
     /// The issued access token.
     #[serde(serialize_with = "serialize_secret_string")]
     pub access_token: SecretString,
@@ -109,16 +112,16 @@ fn parse_4_digits(b: &[u8]) -> Option<u32> {
 
 /// Serializes success params into JSON string.
 // SAFETY: exposes access and refresh tokens
-impl TryFrom<&Oauth20IssueAccessTokenSuccessParams> for String {
+impl TryFrom<&Oauth20AccessTokenSuccessParams> for String {
     type Error = serde_json::Error;
 
-    fn try_from(params: &Oauth20IssueAccessTokenSuccessParams) -> Result<Self, Self::Error> {
+    fn try_from(params: &Oauth20AccessTokenSuccessParams) -> Result<Self, Self::Error> {
         serde_json::to_string(params)
     }
 }
 
 /// Deserializes success params from JSON bytes.
-impl TryFrom<&[u8]> for Oauth20IssueAccessTokenSuccessParams {
+impl TryFrom<&[u8]> for Oauth20AccessTokenSuccessParams {
     type Error = serde_json::Error;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
@@ -130,17 +133,17 @@ impl TryFrom<&[u8]> for Oauth20IssueAccessTokenSuccessParams {
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-5.2>
 #[derive(Clone, Debug, Deserialize)]
-pub struct Oauth20IssueAccessTokenErrorParams {
+pub struct Oauth20AccessTokenErrorParams {
     /// A single ASCII error code.
-    pub error: Oauth20IssueAccessTokenErrorCode,
+    pub error: Oauth20AccessTokenErrorCode,
     /// Human-readable text explaining the error.
     pub error_description: Option<String>,
     /// A URI to a human-readable page about the error.
     pub error_uri: Option<String>,
 }
 
-/// Parses error params for JSON bytes.
-impl TryFrom<&[u8]> for Oauth20IssueAccessTokenErrorParams {
+/// Parses error params from JSON bytes.
+impl TryFrom<&[u8]> for Oauth20AccessTokenErrorParams {
     type Error = serde_json::Error;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
@@ -148,10 +151,10 @@ impl TryFrom<&[u8]> for Oauth20IssueAccessTokenErrorParams {
     }
 }
 
-/// The error code of the [`Oauth20IssueAccessTokenErrorParams`].
+/// The error code of the [`Oauth20AccessTokenErrorParams`].
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Oauth20IssueAccessTokenErrorCode {
+pub enum Oauth20AccessTokenErrorCode {
     /// Client authentication failed.
     InvalidClient,
     /// The grant or refresh token is invalid, expired, or revoked.
