@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-06
+
 ### Added
 
 - Added the JWT profile for OAuth 2.0 client authentication and authorization grants (RFC 7523) as the `rfc7523` module.
@@ -16,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the `jwt-bearer` cargo feature gating the assertion signing key and the x5t helper, since they pull the rsa and sha1 crates; the claims and both coroutines are unconditional wire code.
 - Added `Oauth20ClientStd::request_jwt_bearer_grant` and `Oauth20ClientStd::request_jwt_bearer_client_credentials`, inlining the two RFC 7523 coroutines like the other per-operation methods, plus the `jwt-bearer`-gated `Oauth20ClientStd::sign_jwt_bearer_assertion` defaulting `aud` to the token endpoint and `iat`/`exp` from the system clock while keeping the explicit clock-free path.
 - Added the `jwt_bearer_client_credentials` example, the headless Microsoft certificate credentials flow (sign a client assertion from a PEM key, derive `x5t` from the certificate, exchange for an access token), pointing at `request_jwt_bearer_grant` for the Google section 2.1 variant.
+
+### Changed
+
+- Bumped base64 to 0.23 (internal encoding only, no public API change).
+- Lowered the minimum supported Rust version to 1.87.
 
 ## [0.2.0] - 2026-07-15
 
@@ -87,7 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added OAuth 2.0 module with authorization code grant flow
 
-[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.2.0..HEAD
+[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.2.1..HEAD
+[0.2.1]: https://github.com/pimalaya/io-oauth/compare/v0.2.0..v0.2.1
 [0.2.0]: https://github.com/pimalaya/io-oauth/compare/v0.1.0..v0.2.0
 [0.1.0]: https://github.com/pimalaya/io-oauth/compare/v0.0.4..v0.1.0
 [0.0.4]: https://github.com/pimalaya/io-oauth/compare/v0.0.3..v0.0.4
