@@ -4,9 +4,10 @@
 //! stream, while the TLS-gated [`Oauth20ClientStd::connect`] opens the TCP/TLS
 //! stream itself. Per-operation methods inline the coroutine loop against the
 //! client's stream. The client spans the RFC modules (token operations, device
-//! grant, dynamic client registration), hence its home at the crate root; a
-//! future OAuth version would add its own client alongside, unified behind a
-//! version-agnostic `OauthClientStd` wrapper only once one exists.
+//! grant, JWT bearer exchanges, dynamic client registration), hence its home
+//! at the crate root; a future OAuth version would add its own client
+//! alongside, unified behind a version-agnostic `OauthClientStd` wrapper only
+//! once one exists.
 
 use alloc::{
     boxed::Box,
@@ -15,6 +16,17 @@ use alloc::{
     vec::Vec,
 };
 
+#[cfg(all(
+    feature = "jwt-bearer",
+    not(any(
+        feature = "rustls-aws",
+        feature = "rustls-ring",
+        feature = "native-tls"
+    ))
+))]
+use std::time::Duration;
+#[cfg(feature = "jwt-bearer")]
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     io::{self, BufRead, BufReader, Read, Write},
     net::{Shutdown, TcpListener},
@@ -40,6 +52,10 @@ use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use url::Url;
 
+#[cfg(feature = "jwt-bearer")]
+use crate::rfc7523::assertion::{
+    Oauth20JwtBearerClaims, Oauth20JwtBearerKey, Oauth20JwtBearerSignError,
+};
 #[cfg(any(
     feature = "rustls-aws",
     feature = "rustls-ring",
@@ -54,6 +70,7 @@ use crate::{
         access_token_request::*, client_credentials::*, issue_access_token::*,
         refresh_access_token::*,
     },
+    rfc7523::{auth_grant::*, client_auth::*},
     rfc7591::register::*,
     rfc8628::{auth::*, token::*},
 };
@@ -84,6 +101,16 @@ pub enum Oauth20ClientStdError {
     /// The device code expired before the user completed the flow.
     #[error("OAuth 2.0 device code expired before the user completed authorization")]
     DeviceCodeExpired,
+    /// The JWT bearer grant exchange failed.
+    #[error(transparent)]
+    JwtBearerGrantRequest(#[from] Oauth20JwtBearerGrantRequestError),
+    /// The JWT-authenticated client credentials exchange failed.
+    #[error(transparent)]
+    JwtBearerClientCredentialsRequest(#[from] Oauth20JwtBearerClientCredentialsRequestError),
+    /// The JWT bearer assertion could not be signed.
+    #[cfg(feature = "jwt-bearer")]
+    #[error(transparent)]
+    JwtBearerSign(#[from] Oauth20JwtBearerSignError),
     /// The client registration failed.
     #[error(transparent)]
     ClientRegister(#[from] Oauth20ClientRegisterError),
@@ -264,6 +291,106 @@ impl Oauth20ClientStd {
                 Oauth20ClientCredentialsRequestResult::Err(err) => return Err(err.into()),
             }
         }
+    }
+
+    /// Requests an access token with the JWT bearer authorization
+    /// grant (RFC 7523 section 2.1).
+    ///
+    /// The signed assertion is the grant itself, so no client secret
+    /// is involved. Sign it with
+    /// [`Self::sign_jwt_bearer_assertion`], or with
+    /// [`crate::rfc7523::assertion`] directly for the clock-free
+    /// path. No refresh token is issued; the caller signs a fresh
+    /// assertion and repeats the request on expiry.
+    pub fn request_jwt_bearer_grant(
+        &mut self,
+        params: Oauth20JwtBearerGrantRequestParams<'_>,
+    ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
+        let request = self.build_post_request(&self.token_endpoint);
+        let mut coroutine = Oauth20JwtBearerGrantRequest::new(request, params);
+        let mut buf = [0u8; READ_BUFFER_SIZE];
+        let mut arg: Option<&[u8]> = None;
+
+        loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20JwtBearerGrantRequestResult::Ok(res) => return Ok(res),
+                Oauth20JwtBearerGrantRequestResult::WantsRead => {
+                    let n = self.stream.read(&mut buf)?;
+                    arg = Some(&buf[..n]);
+                }
+                Oauth20JwtBearerGrantRequestResult::WantsWrite(bytes) => {
+                    self.stream.write_all(&bytes)?;
+                }
+                Oauth20JwtBearerGrantRequestResult::Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    /// Requests an access token with the client credentials grant
+    /// authenticated by a JWT client assertion (RFC 7523 section
+    /// 2.2).
+    ///
+    /// The assertion replaces the client secret, so leave
+    /// `client_secret` unset: the Basic `Authorization` header it
+    /// would produce conflicts with the assertion authentication. No
+    /// refresh token is issued; the caller signs a fresh assertion
+    /// and repeats the request on expiry.
+    pub fn request_jwt_bearer_client_credentials(
+        &mut self,
+        params: Oauth20JwtBearerClientCredentialsRequestParams<'_>,
+    ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
+        let request = self.build_post_request(&self.token_endpoint);
+        let mut coroutine = Oauth20JwtBearerClientCredentialsRequest::new(request, params);
+        let mut buf = [0u8; READ_BUFFER_SIZE];
+        let mut arg: Option<&[u8]> = None;
+
+        loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20JwtBearerClientCredentialsRequestResult::Ok(res) => return Ok(res),
+                Oauth20JwtBearerClientCredentialsRequestResult::WantsRead => {
+                    let n = self.stream.read(&mut buf)?;
+                    arg = Some(&buf[..n]);
+                }
+                Oauth20JwtBearerClientCredentialsRequestResult::WantsWrite(bytes) => {
+                    self.stream.write_all(&bytes)?;
+                }
+                Oauth20JwtBearerClientCredentialsRequestResult::Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    /// Signs a JWT bearer assertion, defaulting the claims the
+    /// coroutine layer leaves to the caller.
+    ///
+    /// An empty `aud` defaults to the token endpoint, an unset `iat`
+    /// to the system clock's now, and an unset `exp` to now plus
+    /// `validity`. Claims already set are kept, so the clock-free
+    /// explicit path stays available by setting them all (or by
+    /// calling [`Oauth20JwtBearerKey::sign`] directly).
+    #[cfg(feature = "jwt-bearer")]
+    pub fn sign_jwt_bearer_assertion(
+        &self,
+        key: &Oauth20JwtBearerKey,
+        mut claims: Oauth20JwtBearerClaims<'_>,
+        x5t: Option<&str>,
+        validity: Duration,
+    ) -> Result<SecretString, Oauth20ClientStdError> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        if claims.aud.is_empty() {
+            claims.aud = self.token_endpoint.to_string().into();
+        }
+        if claims.iat.is_none() {
+            claims.iat = Some(now);
+        }
+        if claims.exp.is_none() {
+            claims.exp = Some(now + validity.as_secs());
+        }
+
+        Ok(key.sign(&claims, x5t)?)
     }
 
     /// Requests a device and user code pair from the device authorization

@@ -26,6 +26,7 @@ This library is composed of 3 feature-gated layers:
 - **Authorization code grant with PKCE**: the browser-redirect sign-in flow, hardened for public clients.
 - **Device authorization grant**: sign in by typing a short code on another device, for hosts without a browser.
 - **Client credentials grant**: tokens for machine-to-machine access, with no end user involved.
+- **JWT bearer assertions**: fully headless sign-in with a signed JWT, as a grant of its own (service accounts, user impersonation) or as client authentication (certificate credentials); signing requires the `jwt-bearer` feature.
 - **Token refresh**: trade a refresh token for a fresh access token, whatever grant issued it.
 - **Dynamic client registration**: register a public client on the fly, no provider console nor secret needed.
 - Light standard, blocking client wrapping a stream you opened yourself
@@ -42,11 +43,13 @@ This library is composed of 3 feature-gated layers:
 | RFC    | What is covered                                                                                      |
 |--------|------------------------------------------------------------------------------------------------------|
 | [6749] | The OAuth 2.0 framework: authorization code grant, client credentials grant, token issuance and refresh, CSRF state |
+| [7523] | JWT profile: signed JWTs as authorization grants and as client authentication, RS256 assertion signing |
 | [7591] | Dynamic client registration, plus the preference order between the ways a client obtains its registration |
 | [7636] | PKCE: the proof key securing the authorization code grant for public clients                          |
 | [8628] | Device authorization grant: device and user code request, token endpoint polling                      |
 
 [6749]: https://www.rfc-editor.org/rfc/rfc6749
+[7523]: https://www.rfc-editor.org/rfc/rfc7523
 [7591]: https://www.rfc-editor.org/rfc/rfc7591
 [7636]: https://www.rfc-editor.org/rfc/rfc7636
 [8628]: https://www.rfc-editor.org/rfc/rfc8628

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added the JWT profile for OAuth 2.0 client authentication and authorization grants (RFC 7523) as the `rfc7523` module.
+
+  `rfc7523::auth_grant` holds the `Oauth20JwtBearerGrantRequest` coroutine (section 2.1, `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`, the Google service account flow with domain-wide delegation through the `sub` claim), `rfc7523::client_auth` the `Oauth20JwtBearerClientCredentialsRequest` coroutine (section 2.2, the client credentials grant authenticated by a `client_assertion`, the Microsoft certificate credentials flow), and `rfc7523::assertion` the `Oauth20JwtBearerClaims` claim set plus the `Oauth20JwtBearerKey` RS256 signing key (PKCS#8 or PKCS#1, PEM or DER) and the `x5t_from_der` certificate thumbprint helper. The coroutine layer is clock-free: every time claim is caller-provided.
+
+- Added the `jwt-bearer` cargo feature gating the assertion signing key and the x5t helper, since they pull the rsa and sha1 crates; the claims and both coroutines are unconditional wire code.
+- Added `Oauth20ClientStd::request_jwt_bearer_grant` and `Oauth20ClientStd::request_jwt_bearer_client_credentials`, inlining the two RFC 7523 coroutines like the other per-operation methods, plus the `jwt-bearer`-gated `Oauth20ClientStd::sign_jwt_bearer_assertion` defaulting `aud` to the token endpoint and `iat`/`exp` from the system clock while keeping the explicit clock-free path.
+- Added the `jwt_bearer_client_credentials` example, the headless Microsoft certificate credentials flow (sign a client assertion from a PEM key, derive `x5t` from the certificate, exchange for an access token), pointing at `request_jwt_bearer_grant` for the Google section 2.1 variant.
+
 ## [0.2.0] - 2026-07-15
 
 ### Added

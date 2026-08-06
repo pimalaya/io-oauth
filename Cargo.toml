@@ -3,7 +3,7 @@ name = "io-oauth"
 description = "OAuth client library for Rust"
 version = "0.2.0"
 authors = ["soywod <pimalaya.org@posteo.net>"]
-rust-version = "1.88"
+rust-version = "1.87"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 categories = ["api-bindings", "no-std"]
@@ -19,6 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = ["rustls-ring"]
 client = ["dep:rand", "rand/thread_rng"]
+jwt-bearer = ["dep:rsa", "dep:sha1"]
 native-tls = ["client", "dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pimalaya-stream/std", "pimalaya-stream/native-tls", "io-http/native-tls"]
 rustls-aws = ["client", "dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pimalaya-stream/std", "pimalaya-stream/rustls-aws", "io-http/rustls-aws"]
 rustls-ring = ["client", "dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pimalaya-stream/std", "pimalaya-stream/rustls-ring", "io-http/rustls-ring"]
@@ -34,6 +35,11 @@ name = "device_auth_grant"
 path = "examples/device_auth_grant.rs"
 required-features = ["rustls-ring"]
 
+[[example]]
+name = "jwt_bearer_client_credentials"
+path = "examples/jwt_bearer_client_credentials.rs"
+required-features = ["rustls-ring", "jwt-bearer"]
+
 [dev-dependencies]
 env_logger = "0.11"
 rustls = "0.23"
@@ -41,12 +47,14 @@ rustls-platform-verifier = "0.7"
 
 [dependencies]
 anyhow = { version = "1", default-features = false, optional = true }
-base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 io-http = { version = "0.3", default-features = false }
 log = { version = "0.4", default-features = false }
 pimalaya-stream = { version = "0.1", default-features = false, optional = true }
 rand = { version = "0.10", default-features = false, optional = true }
+rsa = { version = "0.10.0-rc.18", default-features = false, features = ["encoding", "sha2"], optional = true }
 secrecy = { version = "0.10", default-features = false, features = ["serde"] }
+sha1 = { version = "0.11", default-features = false, features = ["alloc", "oid"], optional = true }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false, features = ["zeroize"] }

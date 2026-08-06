@@ -1,4 +1,5 @@
 #![no_std]
+#![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! # io-oauth
@@ -39,6 +40,16 @@
 //! [`rfc8628::token`]; and [`rfc7591`] dynamic client registration
 //! ([`rfc7591::register`]), plus the preference order between the
 //! ways a client obtains its registration ([`rfc7591::source`]).
+//!
+//! [`rfc7523`] adds the JWT profile for fully headless
+//! machine-to-machine authentication: a signed JWT as an
+//! authorization grant of its own ([`rfc7523::auth_grant`], the
+//! Google service account flow) or as the client authentication of
+//! the client credentials grant ([`rfc7523::client_auth`], the
+//! Microsoft certificate credentials flow). The assertion claims and
+//! coroutines are unconditional wire code, while the RS256 signing
+//! key in [`rfc7523::assertion`] sits behind the `jwt-bearer` feature
+//! since it pulls the rsa and sha1 crates.
 //!
 //! The optional [`client`] module (`client` feature) is the
 //! std-blocking [`client::Oauth20ClientStd`] pump: a light client
@@ -93,6 +104,7 @@ extern crate std;
 #[cfg(feature = "client")]
 pub mod client;
 pub mod rfc6749;
+pub mod rfc7523;
 pub mod rfc7591;
 pub mod rfc7636;
 pub mod rfc8628;
