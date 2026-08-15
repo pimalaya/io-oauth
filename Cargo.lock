@@ -104,12 +104,6 @@ checksum = "fd307490d624467aa6f74b0eabb77633d1f758a7b25f12bceb0b22e08d9726f6"
 
 [[package]]
 name = "base64"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
-name = "base64"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
@@ -577,16 +571,16 @@ dependencies = [
 
 [[package]]
 name = "io-http"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb77bacb4b4756646a0056ef54454675fd47eee9a7181cc00d329af25d5482bb"
+checksum = "44d421e14baca9718847498c816e488c1cfdde8f6445e995b8212584b22ceb2a"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64",
  "httparse",
  "log",
  "memchr",
- "pimalaya-stream 0.1.2",
+ "pimalaya-stream",
  "secrecy",
  "thiserror",
  "url",
@@ -597,11 +591,11 @@ name = "io-oauth"
 version = "0.2.2"
 dependencies = [
  "anyhow",
- "base64 0.23.1",
+ "base64",
  "env_logger",
  "io-http",
  "log",
- "pimalaya-stream 0.2.0",
+ "pimalaya-stream",
  "rand",
  "rsa",
  "rustls",
@@ -621,7 +615,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea1200e73a98f7a2500af468bb7857a1c78b5b4b453c8d69760c2a61b9df5303"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "log",
  "thiserror",
 ]
@@ -877,23 +871,6 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
-
-[[package]]
-name = "pimalaya-stream"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6f95d38d529870b6ef4ca97d17a3abd371505d0e5c4337e97200d00b4c72ce2"
-dependencies = [
- "anyhow",
- "io-proxy",
- "log",
- "native-tls",
- "rustls",
- "rustls-platform-verifier",
- "secrecy",
- "uds_windows",
- "url",
-]
 
 [[package]]
 name = "pimalaya-stream"
