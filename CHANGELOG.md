@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-15
+
 ### Changed
 
 - Bumped pimalaya-stream to 0.2, whose only change here is the removal of its SASL module: this crate uses the blocking stream and the TLS options, neither of which moved.
+- Raised the minimum supported Rust version from 1.87 to 1.88, required by the icu crates the url dependency pulls in.
 
 ## [0.2.1] - 2026-08-06
 
@@ -98,7 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added OAuth 2.0 module with authorization code grant flow
 
-[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.2.1..HEAD
+[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.2.2..HEAD
+[0.2.2]: https://github.com/pimalaya/io-oauth/compare/v0.2.1..v0.2.2
 [0.2.1]: https://github.com/pimalaya/io-oauth/compare/v0.2.0..v0.2.1
 [0.2.0]: https://github.com/pimalaya/io-oauth/compare/v0.1.0..v0.2.0
 [0.1.0]: https://github.com/pimalaya/io-oauth/compare/v0.0.4..v0.1.0
