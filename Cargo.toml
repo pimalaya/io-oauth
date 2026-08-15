@@ -2,8 +2,8 @@
 name = "io-oauth"
 description = "OAuth client library for Rust"
 version = "0.2.1"
-authors = ["soywod <pimalaya.org@posteo.net>"]
-rust-version = "1.87"
+authors = ["Clément DOUIN (soywod) <pimalaya.org@posteo.net>"]
+rust-version = "1.88"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 categories = ["api-bindings", "no-std"]
@@ -50,7 +50,7 @@ anyhow = { version = "1", default-features = false, optional = true }
 base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 io-http = { version = "0.3", default-features = false }
 log = { version = "0.4", default-features = false }
-pimalaya-stream = { version = "0.1", default-features = false, optional = true }
+pimalaya-stream = { version = "0.2", default-features = false, optional = true }
 rand = { version = "0.10", default-features = false, optional = true }
 rsa = { version = "0.10.0-rc.18", default-features = false, features = ["encoding", "sha2"], optional = true }
 secrecy = { version = "0.10", default-features = false, features = ["serde"] }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped pimalaya-stream to 0.2, whose only change here is the removal of its SASL module: this crate uses the blocking stream and the TLS options, neither of which moved.
+
 ## [0.2.1] - 2026-08-06
 
 ### Added
