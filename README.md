@@ -29,8 +29,8 @@ This library is composed of 3 feature-gated layers:
 - **JWT bearer assertions**: fully headless sign-in with a signed JWT, as a grant of its own (service accounts, user impersonation) or as client authentication (certificate credentials); signing requires the `jwt-bearer` feature.
 - **Token refresh**: trade a refresh token for a fresh access token, whatever grant issued it.
 - **Dynamic client registration**: register a public client on the fly, no provider console nor secret needed.
-- Light standard, blocking client wrapping a stream you opened yourself
-- Full standard, blocking client with **TLS** support:
+- **Light client**: a standard, blocking client wrapping a stream you opened yourself.
+- **Full client** with **TLS** support:
   - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
@@ -56,11 +56,11 @@ This library is composed of 3 feature-gated layers:
 
 ## Usage
 
-The whole API is documented on [docs.rs](https://docs.rs/io-oauth/latest/io_oauth), including runnable snippets for every coroutine and client.
+See documentation at [docs.rs](https://docs.rs/io-oauth/latest/io_oauth).
 
 ## Examples
 
-Complete runnable programs live in [./examples](./examples); the tests also demonstrate real usage.
+See complete examples at [./examples](./examples).
 
 ## License
 

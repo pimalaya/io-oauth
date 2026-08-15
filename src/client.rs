@@ -47,7 +47,10 @@ use io_http::{rfc7617::basic::HttpAuthBasic, rfc9110::request::HttpRequest};
     feature = "rustls-ring",
     feature = "native-tls"
 ))]
-use pimalaya_stream::{std::stream::StreamStd, tls::Tls};
+use pimalaya_stream::{
+    stream::{Stream, TcpConnectOptions, TlsConnectOptions},
+    tls::Tls,
+};
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use url::Url;
@@ -194,9 +197,16 @@ impl Oauth20ClientStd {
 
         let stream = match token_endpoint.scheme() {
             scheme if scheme.eq_ignore_ascii_case("https") => {
-                StreamStd::connect_tls(host, port, tls)?
+                let opts = TlsConnectOptions {
+                    tls: tls.clone(),
+                    ..Default::default()
+                };
+
+                Stream::connect_tls(host, port, opts)?
             }
-            scheme if scheme.eq_ignore_ascii_case("http") => StreamStd::connect_tcp(host, port)?,
+            scheme if scheme.eq_ignore_ascii_case("http") => {
+                Stream::connect_tcp(host, port, TcpConnectOptions::default())?
+            }
             scheme => {
                 return Err(Oauth20ClientStdError::UrlUnsupportedScheme {
                     url: token_endpoint.to_string(),

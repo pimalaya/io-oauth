@@ -571,9 +571,9 @@ dependencies = [
 
 [[package]]
 name = "io-http"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44d421e14baca9718847498c816e488c1cfdde8f6445e995b8212584b22ceb2a"
+checksum = "4fe2064378f85c13e3f3aca141308fa541c4478ff5cf5ebadd7dcbcce1a44281"
 dependencies = [
  "anyhow",
  "base64",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "io-oauth"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -874,9 +874,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pimalaya-stream"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df1a31126b778f0978fabd423f4036c3d44cf409efd6c85123cb526b5cee4a73"
+checksum = "b327ad009344854c74da2a96956f312241ffb90d8680159736d2303d50ae5cf2"
 dependencies = [
  "anyhow",
  "io-proxy",
