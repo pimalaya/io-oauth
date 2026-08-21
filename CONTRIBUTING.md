@@ -7,7 +7,7 @@ Whether you are a human or an AI agent, read these in order before touching the 
 1. the [Pimalaya README](https://github.com/pimalaya) for what the project is and how its repositories stack;
 2. the [Pimalaya CONTRIBUTING](https://github.com/pimalaya/.github/blob/master/CONTRIBUTING.md) guide, which chains to the shared architecture and guidelines;
 3. the inline header documentation, starting with src/lib.rs (or src/main.rs): it is the architecture document of this crate;
-4. the docs/ folder for the development history and living plans.
+4. the cairn/ folder for the development history and living plans (the Cairn convention: spec/, changes/, log/).
 
 Everything below documents only what differs from the Pimalaya standards.
 
