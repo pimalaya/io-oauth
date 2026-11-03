@@ -8,6 +8,7 @@ use alloc::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     string::String,
+    vec::Vec,
 };
 
 use url::Url;
@@ -37,6 +38,14 @@ pub struct Oauth20AuthRequestParams<'a> {
     pub state: Option<Cow<'a, Oauth20State>>,
     /// The PKCE code challenge, when the flow uses PKCE (RFC 7636).
     pub pkce_code_challenge: Option<Cow<'a, Oauth20PkceCodeChallenge>>,
+    /// The resources the token is meant for, one `resource` parameter each.
+    ///
+    /// A server bound to a resource refuses a request without it, with the
+    /// `invalid_target` error. Empty sends none; an extra or an endpoint
+    /// parameter named `resource` replaces them all.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc8707#section-2>
+    pub resource: Vec<Url>,
     /// Extra query parameters appended to the authorization URL.
     ///
     /// Carries provider-specific parameters not covered by the typed fields
@@ -102,7 +111,76 @@ impl Oauth20AuthRequestParams<'_> {
         let mut qm = url.query_pairs_mut();
         qm.clear();
         qm.extend_pairs(params.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+
+        if !params.contains_key("resource") {
+            for resource in &self.resource {
+                qm.append_pair("resource", resource.as_str());
+            }
+        }
+
         drop(qm);
         url
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{
+        borrow::Cow,
+        collections::{BTreeMap, BTreeSet},
+        string::String,
+        vec,
+        vec::Vec,
+    };
+
+    use url::Url;
+
+    use crate::rfc6749::auth_request::*;
+
+    fn params(resource: Vec<Url>) -> Oauth20AuthRequestParams<'static> {
+        Oauth20AuthRequestParams {
+            client_id: Cow::Borrowed("client"),
+            redirect_uri: None,
+            scope: BTreeSet::new(),
+            state: None,
+            pkce_code_challenge: None,
+            resource,
+            extras: BTreeMap::new(),
+        }
+    }
+
+    fn resources_of(url: &Url) -> Vec<String> {
+        url.query_pairs()
+            .filter(|(k, _)| k == "resource")
+            .map(|(_, v)| v.into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn every_resource_is_its_own_parameter() {
+        let endpoint = Url::parse("https://example.test/authorize").unwrap();
+        let params = params(vec![
+            Url::parse("https://api.example.test/jmap").unwrap(),
+            Url::parse("https://dav.example.test/").unwrap(),
+        ]);
+
+        assert_eq!(
+            resources_of(&params.build_url(&endpoint)),
+            ["https://api.example.test/jmap", "https://dav.example.test/"]
+        );
+    }
+
+    #[test]
+    fn a_resource_extra_replaces_the_typed_resources() {
+        let endpoint = Url::parse("https://example.test/authorize").unwrap();
+        let mut params = params(vec![Url::parse("https://typed.example.test/").unwrap()]);
+        params
+            .extras
+            .insert("resource".into(), "https://extra.example.test/".into());
+
+        assert_eq!(
+            resources_of(&params.build_url(&endpoint)),
+            ["https://extra.example.test/"]
+        );
     }
 }

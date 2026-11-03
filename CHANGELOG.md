@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: Changed `rfc6749::auth_request::Oauth20AuthRequestParams` to carry `resource`, the RFC 8707 resource indicators.
+
+  Each entry is one `resource` parameter. A `resource` extra or endpoint parameter replaces them.
+
+- **BREAKING**: Changed `rfc6749::access_token_request::Oauth20AccessTokenRequestParams` to carry `resource`, the RFC 8707 resource indicators.
+
 ## [0.4.1] - 2026-11-03
 
 ### Changed

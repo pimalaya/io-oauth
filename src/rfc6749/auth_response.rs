@@ -185,8 +185,10 @@ pub enum Oauth20AuthErrorCode {
     TemporarilyUnavailable,
     /// The `resource` parameter is invalid or missing (RFC 8707).
     ///
-    /// Servers requiring an explicit `resource` (fastmail) answer this when
-    /// the authorization request carries none.
+    /// A server bound to a resource answers this to a request carrying none:
+    /// set [`Oauth20AuthRequestParams::resource`].
+    ///
+    /// [`Oauth20AuthRequestParams::resource`]: crate::rfc6749::auth_request::Oauth20AuthRequestParams::resource
     ///
     /// Refs: <https://datatracker.ietf.org/doc/html/rfc8707#section-3>
     InvalidTarget,

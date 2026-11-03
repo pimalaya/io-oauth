@@ -57,6 +57,7 @@ fn main() {
         scope: scope.split_whitespace().map(Into::into).collect(),
         state: Some(Cow::Borrowed(&state)),
         pkce_code_challenge: None,
+        resource: Vec::new(),
         extras: BTreeMap::new(),
     }
     .build_url(&auth_uri);
@@ -99,6 +100,7 @@ fn main() {
         client_id: client_id.into(),
         client_secret: None,
         pkce_code_verifier: None,
+        resource: Vec::new(),
     };
 
     let mut send = Oauth20AccessTokenRequest::new(request, params);

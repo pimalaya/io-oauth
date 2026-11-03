@@ -193,6 +193,11 @@ pub enum Oauth20AccessTokenErrorCode {
     BadVerificationCode,
     /// The `resource` parameter is invalid or missing (RFC 8707).
     ///
+    /// A server bound to a resource answers this to a request carrying none:
+    /// set [`Oauth20AccessTokenRequestParams::resource`].
+    ///
+    /// [`Oauth20AccessTokenRequestParams::resource`]: crate::rfc6749::access_token_request::Oauth20AccessTokenRequestParams::resource
+    ///
     /// Refs: <https://datatracker.ietf.org/doc/html/rfc8707#section-3>
     InvalidTarget,
     /// Any unregistered code, kept for provider-specific extensions.

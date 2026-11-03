@@ -31,5 +31,8 @@ The authorization error response SHALL carry a typed error code covering the RFC
 ### Requirement: Code exchange
 The code SHALL be exchanged against the token endpoint with the authorization code, the redirect URI when the authorization request carried one, the client id, the optional client secret for a confidential client and the PKCE code verifier when the flow uses PKCE. The body SHALL be form-urlencoded.
 
+### Requirement: Resource indicators
+The authorization request and the code exchange SHALL carry an optional list of RFC 8707 resource indicators, sent as one `resource` parameter each and omitted when empty. On the authorization URL, an extra parameter or an endpoint parameter named `resource` SHALL replace the typed list.
+
 ### Requirement: PKCE
 The crate SHALL generate a high-entropy code verifier of caller-chosen size, clamped to the 43 to 128 unreserved characters RFC 7636 section 4.1 allows, and derive the challenge under `plain` or `S256`, the latter being the base64url-encoded SHA-256 of the verifier.

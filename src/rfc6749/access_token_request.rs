@@ -31,6 +31,7 @@
 //!     client_id: "client-id".into(),
 //!     client_secret: None,
 //!     pkce_code_verifier: None,
+//!     resource: Vec::new(),
 //! };
 //!
 //! let mut stream = TcpStream::connect("example.com:443").unwrap();
@@ -103,6 +104,12 @@ pub struct Oauth20AccessTokenRequestParams<'a> {
     pub client_secret: Option<SecretString>,
     /// The PKCE code verifier, when the flow uses PKCE (RFC 7636).
     pub pkce_code_verifier: Option<Cow<'a, Oauth20PkceCodeVerifier>>,
+    /// The resources the token is meant for, one `resource` parameter each.
+    ///
+    /// Empty sends none.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc8707#section-2.2>
+    pub resource: Vec<Url>,
 }
 
 impl<'a> Oauth20AccessTokenRequestParams<'a> {
@@ -127,6 +134,10 @@ impl<'a> Oauth20AccessTokenRequestParams<'a> {
         if let Some(verifier) = &self.pkce_code_verifier {
             let verifier = String::from_utf8_lossy(verifier.expose());
             serializer.append_pair("code_verifier", &verifier);
+        }
+
+        for resource in &self.resource {
+            serializer.append_pair("resource", resource.as_str());
         }
 
         serializer
@@ -237,5 +248,36 @@ impl Oauth20AccessTokenRequest {
                 Oauth20AccessTokenRequestResult::Err(err.into())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{string::ToString, vec};
+
+    use url::Url;
+
+    use crate::rfc6749::access_token_request::*;
+
+    #[test]
+    fn every_resource_is_its_own_body_pair() {
+        let params = Oauth20AccessTokenRequestParams {
+            code: "code".into(),
+            redirect_uri: None,
+            client_id: "client".into(),
+            client_secret: None,
+            pkce_code_verifier: None,
+            resource: vec![
+                Url::parse("https://api.example.test/jmap").unwrap(),
+                Url::parse("https://dav.example.test/").unwrap(),
+            ],
+        };
+
+        assert_eq!(
+            params.to_string(),
+            "grant_type=authorization_code&code=code&client_id=client\
+             &resource=https%3A%2F%2Fapi.example.test%2Fjmap\
+             &resource=https%3A%2F%2Fdav.example.test%2F"
+        );
     }
 }
