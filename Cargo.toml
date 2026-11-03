@@ -52,11 +52,11 @@ io-http = { version = "0.5", default-features = false }
 log = { version = "0.4", default-features = false }
 pimalaya-stream = { version = "0.3", default-features = false, optional = true }
 rand = { version = "0.10", default-features = false, optional = true }
-rsa = { version = "0.10.0-rc.18", default-features = false, features = ["encoding", "sha2"], optional = true }
+rsa = { version = "0.10.0-rc.20", default-features = false, features = ["encoding"], optional = true }
 secrecy = { version = "0.10", default-features = false, features = ["serde"] }
-sha1 = { version = "0.11", default-features = false, features = ["alloc", "oid"], optional = true }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+sha1 = { version = "0.11", default-features = false, features = ["alloc", "oid"], optional = true }
 sha2 = { version = "0.11", default-features = false, features = ["zeroize"] }
 thiserror = { version = "2", default-features = false }
 url = { version = "2.5", default-features = false, features = ["serde"] }
