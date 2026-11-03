@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-03
+
+### Changed
+
+- **BREAKING**: Bumped io-http to 0.6.
+
+  The coroutines take and yield its types, so consumers bump it in step. A token response over 64 KiB of head or 256 MiB of body now fails with `SendHttpRequest`.
+
+- Raised the minimum supported Rust version from 1.88 to 1.89.
+
 ## [0.3.1] - 2026-11-03
 
 ### Changed
@@ -178,7 +188,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Added the OAuth 2.0 authorization code grant.
 
-[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.3.1..HEAD
+[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.4.0..HEAD
+[0.4.0]: https://github.com/pimalaya/io-oauth/compare/v0.3.1..v0.4.0
 [0.3.1]: https://github.com/pimalaya/io-oauth/compare/v0.3.0..v0.3.1
 [0.3.0]: https://github.com/pimalaya/io-oauth/compare/v0.2.3..v0.3.0
 [0.2.3]: https://github.com/pimalaya/io-oauth/compare/v0.2.2..v0.2.3

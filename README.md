@@ -29,10 +29,7 @@ This library is composed of 3 feature-gated layers:
 - **JWT bearer assertions**: headless sign-in with a signed JWT (requires `jwt-bearer` feature).
 - **Token refresh**: trade a refresh token for a fresh access token.
 - **Dynamic client registration**: register a public client on the fly, no provider console needed.
-- Full standard, blocking client with **TLS** support:
-  - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
-  - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
-  - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
+- **Full client**: standard blocking client with TLS via Rustls (`rustls-ring` default, `rustls-aws`) or Native TLS (`native-tls`).
 
 > [!TIP]
 > I/O OAuth is written in [Rust](https://www.rust-lang.org/) and uses [cargo features](https://doc.rust-lang.org/cargo/reference/features.html) to gate backend support. The default feature set is declared in [Cargo.toml](./Cargo.toml) or on [docs.rs](https://docs.rs/crate/io-oauth/latest/features).
