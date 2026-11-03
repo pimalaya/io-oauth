@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced the base64 crate with [base64-codec](https://crates.io/crates/base64-codec) for the PKCE challenge and the JWT bearer assertion.
+
+  It runs on the CPU token the application installs with `simd_cpu::SimdCpu::install_detected`, the portable baseline when none is.
+
+### Security
+
+- Raised the pimalaya-stream requirement to 0.3.1, fixing RUSTSEC-2026-0346 to RUSTSEC-2026-0349.
+
+  It requires rustls 0.23.46.
+
 ## [0.4.0] - 2026-11-03
 
 ### Changed

@@ -9,6 +9,8 @@
 //! the signing key and the x5t helper sit behind the `jwt-bearer`
 //! feature since they pull the rsa and sha1 crates.
 
+#[cfg(feature = "jwt-bearer")]
+use alloc::vec::Vec;
 use alloc::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
@@ -16,7 +18,7 @@ use alloc::{
 };
 
 #[cfg(feature = "jwt-bearer")]
-use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+use base64_codec::codec::{Base64Alphabet, Base64Codec};
 #[cfg(feature = "jwt-bearer")]
 use log::{debug, trace};
 #[cfg(feature = "jwt-bearer")]
@@ -235,13 +237,13 @@ impl Oauth20JwtBearerKey {
         let payload = serde_json::to_string(claims)?;
         trace!("header: {header}, payload: {payload}");
 
-        let mut jws = BASE64_URL_SAFE_NO_PAD.encode(header);
+        let mut jws = base64url(header.as_bytes());
         jws.push('.');
-        jws.push_str(&BASE64_URL_SAFE_NO_PAD.encode(payload));
+        jws.push_str(&base64url(payload.as_bytes()));
 
         let signature = self.key.try_sign(jws.as_bytes())?;
         jws.push('.');
-        jws.push_str(&BASE64_URL_SAFE_NO_PAD.encode(signature.to_bytes()));
+        jws.push_str(&base64url(&signature.to_bytes()));
 
         debug!("end of JWT bearer assertion signing");
         Ok(jws.into())
@@ -264,14 +266,32 @@ impl core::fmt::Debug for Oauth20JwtBearerKey {
 /// `base64url(sha1(cert_der))` with no padding.
 #[cfg(feature = "jwt-bearer")]
 pub fn x5t_from_der(cert_der: &[u8]) -> String {
-    BASE64_URL_SAFE_NO_PAD.encode(Sha1::digest(cert_der))
+    base64url(&Sha1::digest(cert_der))
+}
+
+/// Encodes `bytes` in unpadded base64url, as JWS compact serialization needs.
+///
+/// Refs: <https://datatracker.ietf.org/doc/html/rfc7515#section-2>
+#[cfg(feature = "jwt-bearer")]
+fn base64url(bytes: &[u8]) -> String {
+    let codec = Base64Codec {
+        alphabet: Base64Alphabet::Url,
+        pad: false,
+        ..Base64Codec::default()
+    };
+
+    let mut encoded = Vec::new();
+    codec.encode_vec(bytes, &mut encoded);
+
+    // NOTE: the base64 alphabet is ASCII, so this never falls back.
+    String::from_utf8(encoded).unwrap_or_default()
 }
 
 #[cfg(all(test, feature = "jwt-bearer"))]
 mod tests {
     use alloc::{format, string::String, vec::Vec};
 
-    use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+    use base64_codec::codec::{Base64Alphabet, Base64Codec};
     use rsa::{
         RsaPrivateKey,
         pkcs1v15::{Signature, VerifyingKey},
@@ -344,8 +364,19 @@ Uz4xpoYU8cPObY7JmDznKvc=
         (
             String::from(header),
             String::from(payload),
-            BASE64_URL_SAFE_NO_PAD.decode(signature).unwrap(),
+            base64url_decode(signature),
         )
+    }
+
+    fn base64url_decode(text: &str) -> Vec<u8> {
+        let codec = Base64Codec {
+            alphabet: Base64Alphabet::Url,
+            ..Base64Codec::default()
+        };
+
+        let mut decoded = Vec::new();
+        assert!(codec.decode_vec(text.as_bytes(), &mut decoded), "{text}");
+        decoded
     }
 
     #[test]
@@ -354,15 +385,13 @@ Uz4xpoYU8cPObY7JmDznKvc=
         let jws = key.sign(&google_claims(), Some("thumb")).unwrap();
         let (header, payload, signature) = split(jws.expose_secret());
 
-        let decoded: Value =
-            serde_json::from_slice(&BASE64_URL_SAFE_NO_PAD.decode(&header).unwrap()).unwrap();
+        let decoded: Value = serde_json::from_slice(&base64url_decode(&header)).unwrap();
         assert_eq!(
             decoded,
             json!({"alg": "RS256", "typ": "JWT", "x5t": "thumb"})
         );
 
-        let decoded: Value =
-            serde_json::from_slice(&BASE64_URL_SAFE_NO_PAD.decode(&payload).unwrap()).unwrap();
+        let decoded: Value = serde_json::from_slice(&base64url_decode(&payload)).unwrap();
         assert_eq!(
             decoded,
             json!({
@@ -389,8 +418,7 @@ Uz4xpoYU8cPObY7JmDznKvc=
         let jws = key.sign(&google_claims(), None).unwrap();
         let (header, _, _) = split(jws.expose_secret());
 
-        let decoded: Value =
-            serde_json::from_slice(&BASE64_URL_SAFE_NO_PAD.decode(&header).unwrap()).unwrap();
+        let decoded: Value = serde_json::from_slice(&base64url_decode(&header)).unwrap();
         assert_eq!(decoded, json!({"alg": "RS256", "typ": "JWT"}));
     }
 
@@ -402,7 +430,7 @@ Uz4xpoYU8cPObY7JmDznKvc=
 
         let mut tampered = google_claims();
         tampered.sub = Some("attacker@example.com".into());
-        let payload = BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_string(&tampered).unwrap());
+        let payload = base64url(serde_json::to_string(&tampered).unwrap().as_bytes());
 
         let signature = Signature::try_from(signature.as_slice()).unwrap();
         let signing_input = format!("{header}.{payload}");

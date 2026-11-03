@@ -22,7 +22,7 @@ use std::{
     time::Duration,
 };
 
-use base64::{Engine, prelude::BASE64_STANDARD};
+use base64_codec::codec::Base64Codec;
 use io_oauth::{
     client::Oauth20ClientStd,
     rfc7523::{assertion::*, client_auth::*},
@@ -132,7 +132,9 @@ fn cert_der(bytes: Vec<u8>) -> Vec<u8> {
         .filter(|line| !line.starts_with("-----"))
         .collect();
 
-    BASE64_STANDARD.decode(body).unwrap()
+    let mut der = Vec::new();
+    assert!(Base64Codec::default().decode_vec(body.as_bytes(), &mut der));
+    der
 }
 
 fn read_line(prompt: &str) -> String {

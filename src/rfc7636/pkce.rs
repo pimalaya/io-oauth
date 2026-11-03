@@ -6,11 +6,11 @@
 
 use core::str::FromStr;
 
-use alloc::{borrow::Cow, string::String};
 #[cfg(feature = "client")]
-use alloc::{boxed::Box, vec::Vec};
+use alloc::boxed::Box;
+use alloc::{borrow::Cow, string::String, vec::Vec};
 
-use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+use base64_codec::codec::{Base64Alphabet, Base64Codec};
 use log::debug;
 #[cfg(feature = "client")]
 use rand::seq::IndexedRandom;
@@ -50,7 +50,7 @@ impl Oauth20PkceCodeChallenge {
             }
             Oauth20PkceCodeChallengeMethod::Sha256 => {
                 let digest = Sha256::digest(self.verifier.expose());
-                BASE64_URL_SAFE_NO_PAD.encode(digest).into()
+                base64url(&digest).into()
             }
         }
     }
@@ -133,5 +133,46 @@ impl FromStr for Oauth20PkceCodeVerifier {
         }
 
         Ok(Self(SecretBox::from(bytes.to_vec())))
+    }
+}
+
+/// Encodes `bytes` in unpadded base64url, as the `S256` challenge needs.
+///
+/// Refs: <https://datatracker.ietf.org/doc/html/rfc7636#appendix-A>
+fn base64url(bytes: &[u8]) -> String {
+    let codec = Base64Codec {
+        alphabet: Base64Alphabet::Url,
+        pad: false,
+        ..Base64Codec::default()
+    };
+
+    let mut encoded = Vec::new();
+    codec.encode_vec(bytes, &mut encoded);
+
+    // NOTE: the base64 alphabet is ASCII, so this never falls back.
+    String::from_utf8(encoded).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use core::str::FromStr;
+
+    use crate::rfc7636::pkce::*;
+
+    /// The RFC 7636 Appendix B example, whose challenge holds a `-`.
+    #[test]
+    fn s256_challenge_matches_the_rfc_example() {
+        let challenge = Oauth20PkceCodeChallenge {
+            method: Oauth20PkceCodeChallengeMethod::Sha256,
+            verifier: Oauth20PkceCodeVerifier::from_str(
+                "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+            )
+            .unwrap(),
+        };
+
+        assert_eq!(
+            challenge.encode(),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
     }
 }
