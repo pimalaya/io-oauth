@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-03
+
 ### Changed
 
 - Replaced the base64 crate with [base64-codec](https://crates.io/crates/base64-codec) for the PKCE challenge and the JWT bearer assertion.
@@ -200,7 +202,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Added the OAuth 2.0 authorization code grant.
 
-[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.4.0..HEAD
+[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.4.1..HEAD
+[0.4.1]: https://github.com/pimalaya/io-oauth/compare/v0.4.0..v0.4.1
 [0.4.0]: https://github.com/pimalaya/io-oauth/compare/v0.3.1..v0.4.0
 [0.3.1]: https://github.com/pimalaya/io-oauth/compare/v0.3.0..v0.3.1
 [0.3.0]: https://github.com/pimalaya/io-oauth/compare/v0.2.3..v0.3.0
