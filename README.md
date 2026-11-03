@@ -22,15 +22,14 @@ This library is composed of 3 feature-gated layers:
 
 ## Features
 
-- **I/O-free coroutines**: no_std state machines with no sockets and no async runtime, resumable from any blocking, async or in-memory test harness.
-- **Authorization code grant with PKCE**: the browser-redirect sign-in flow, hardened for public clients.
-- **Device authorization grant**: sign in by typing a short code on another device, for hosts without a browser.
-- **Client credentials grant**: tokens for machine-to-machine access, with no end user involved.
-- **JWT bearer assertions**: fully headless sign-in with a signed JWT, as a grant of its own (service accounts, user impersonation) or as client authentication (certificate credentials); signing requires the `jwt-bearer` feature.
-- **Token refresh**: trade a refresh token for a fresh access token, whatever grant issued it.
-- **Dynamic client registration**: register a public client on the fly, no provider console nor secret needed.
-- **Light client**: a standard, blocking client wrapping a stream you opened yourself.
-- **Full client** with **TLS** support:
+- **I/O-free coroutines**: no_std state machines, usable from any blocking or async runtime.
+- **Authorization code grant with PKCE**: the browser-redirect sign-in flow, safe for public clients.
+- **Device authorization grant**: sign in by typing a short code on another device.
+- **Client credentials grant**: machine-to-machine tokens, with no end user involved.
+- **JWT bearer assertions**: headless sign-in with a signed JWT (requires `jwt-bearer` feature).
+- **Token refresh**: trade a refresh token for a fresh access token.
+- **Dynamic client registration**: register a public client on the fly, no provider console needed.
+- Full standard, blocking client with **TLS** support:
   - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
