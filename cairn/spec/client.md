@@ -12,7 +12,7 @@ The optional `client` feature ships `Oauth20ClientStd`, a ready-made pump for ca
 The client SHALL wrap any pre-connected `Read + Write + Send` stream, and SHALL expose a replacement setter so a caller can swap the transport between operations. Under a TLS feature it SHALL also open the connection itself, plain TCP for `http://` and implicit TLS for `https://`, rejecting any other scheme and a URL missing host or port.
 
 ### Requirement: One method per exchange
-The client SHALL expose one method per OAuth exchange: authorization code exchange, refresh, client credentials, both JWT bearer exchanges, device authorization, device token poll and client registration.
+The client SHALL expose one method per OAuth exchange: authorization code exchange, refresh, client credentials, both JWT bearer exchanges, device authorization, device token poll, client registration and token revocation.
 
 ### Requirement: Crate-root home
 The client SHALL live at the crate root rather than under an RFC module, since it spans them. A future OAuth version would add its own client alongside, unified behind a version-agnostic wrapper only once one exists.

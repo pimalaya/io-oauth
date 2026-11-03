@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added `rfc7009::revoke`, the RFC 7009 token revocation coroutine.
+- Added `client::Oauth20ClientStd::revoke_token`.
+
 ### Changed
 
 - **BREAKING**: Changed `rfc6749::auth_request::Oauth20AuthRequestParams` to carry `resource`, the RFC 8707 resource indicators.

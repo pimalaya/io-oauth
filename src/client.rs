@@ -73,6 +73,7 @@ use crate::{
         access_token_request::*, client_credentials::*, issue_access_token::*,
         refresh_access_token::*,
     },
+    rfc7009::revoke::*,
     rfc7523::{auth_grant::*, client_auth::*},
     rfc7591::register::*,
     rfc8628::{auth::*, token::*},
@@ -114,6 +115,9 @@ pub enum Oauth20ClientStdError {
     #[cfg(feature = "jwt-bearer")]
     #[error(transparent)]
     JwtBearerSign(#[from] Oauth20JwtBearerSignError),
+    /// The token revocation failed.
+    #[error(transparent)]
+    TokenRevoke(#[from] Oauth20TokenRevokeError),
     /// The client registration failed.
     #[error(transparent)]
     ClientRegister(#[from] Oauth20ClientRegisterError),
@@ -540,6 +544,37 @@ impl Oauth20ClientStd {
                     self.stream.write_all(&bytes)?;
                 }
                 Oauth20ClientRegisterResult::Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    /// Revokes a token against the revocation endpoint.
+    ///
+    /// The revocation endpoint usually lives on the token endpoint's
+    /// host; when it does not, wrap a stream connected to it instead
+    /// (see [`Self::set_stream`]). Returns the server's response: done,
+    /// or the params of a rejected revocation.
+    pub fn revoke_token(
+        &mut self,
+        endpoint: &Url,
+        params: Oauth20TokenRevokeParams,
+    ) -> Result<Oauth20TokenRevokeResponse, Oauth20ClientStdError> {
+        let request = self.build_post_request(endpoint);
+        let mut coroutine = Oauth20TokenRevoke::new(request, params);
+        let mut buf = [0u8; READ_BUFFER_SIZE];
+        let mut arg: Option<&[u8]> = None;
+
+        loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20TokenRevokeResult::Ok(res) => return Ok(res),
+                Oauth20TokenRevokeResult::WantsRead => {
+                    let n = self.stream.read(&mut buf)?;
+                    arg = Some(&buf[..n]);
+                }
+                Oauth20TokenRevokeResult::WantsWrite(bytes) => {
+                    self.stream.write_all(&bytes)?;
+                }
+                Oauth20TokenRevokeResult::Err(err) => return Err(err.into()),
             }
         }
     }

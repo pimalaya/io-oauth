@@ -41,6 +41,10 @@
 //! ([`rfc7591::register`]), plus the preference order between the
 //! ways a client obtains its registration ([`rfc7591::source`]).
 //!
+//! [`rfc7009`] revokes a token once it is no longer needed
+//! ([`rfc7009::revoke`]), against the revocation endpoint the RFC 8414
+//! metadata advertises.
+//!
 //! [`rfc7523`] adds the JWT profile for fully headless
 //! machine-to-machine authentication: a signed JWT as an
 //! authorization grant of its own ([`rfc7523::auth_grant`], the
@@ -104,6 +108,7 @@ extern crate std;
 #[cfg(feature = "client")]
 pub mod client;
 pub mod rfc6749;
+pub mod rfc7009;
 pub mod rfc7523;
 pub mod rfc7591;
 pub mod rfc7636;
