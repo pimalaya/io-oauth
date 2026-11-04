@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-04
+
 ### Added
 
 - Added `client::await_redirect_on`, accepting the authorization redirect on a listener the caller bound.
@@ -221,7 +223,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Added the OAuth 2.0 authorization code grant.
 
-[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.5.0..HEAD
+[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.5.1..HEAD
+[0.5.1]: https://github.com/pimalaya/io-oauth/compare/v0.5.0..v0.5.1
 [0.5.0]: https://github.com/pimalaya/io-oauth/compare/v0.4.1..v0.5.0
 [0.4.1]: https://github.com/pimalaya/io-oauth/compare/v0.4.0..v0.4.1
 [0.4.0]: https://github.com/pimalaya/io-oauth/compare/v0.3.1..v0.4.0
