@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-04
+
 ### Added
 
 - Added `rfc7009::revoke`, the RFC 7009 token revocation coroutine.
@@ -215,7 +217,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Added the OAuth 2.0 authorization code grant.
 
-[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.4.1..HEAD
+[unreleased]: https://github.com/pimalaya/io-oauth/compare/v0.5.0..HEAD
+[0.5.0]: https://github.com/pimalaya/io-oauth/compare/v0.4.1..v0.5.0
 [0.4.1]: https://github.com/pimalaya/io-oauth/compare/v0.4.0..v0.4.1
 [0.4.0]: https://github.com/pimalaya/io-oauth/compare/v0.3.1..v0.4.0
 [0.3.1]: https://github.com/pimalaya/io-oauth/compare/v0.3.0..v0.3.1
