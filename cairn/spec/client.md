@@ -24,7 +24,7 @@ The client SHALL offer a blocking device-token wait that sleeps the advertised i
 Each poll SHALL open a fresh connection, authorization servers rarely keeping the socket alive between polls, while carrying over the client credentials the client already holds.
 
 ### Requirement: Redirect listener
-The client SHALL offer a single-shot local listener that waits for the authorization redirect, answers a placeholder `200 OK` and returns the redirected URL carrying the code and state. Tracking the PKCE verifier and the original state SHALL stay the caller's business.
+The client SHALL offer a single-shot local listener that waits for the authorization redirect, answers a placeholder `200 OK` and returns the redirected URL carrying the code and state. It SHALL also accept on a listener the caller bound, so the port can be held from before the authorization URL is handed out. Tracking the PKCE verifier and the original state SHALL stay the caller's business.
 
 ### Requirement: Clock and sleep confined here
 Reading a clock and sleeping SHALL happen in this layer only, the coroutines staying clock-free. The client SHALL offer an assertion-signing convenience filling the unset `aud`, `iat` and `exp` claims from its token endpoint and the current time, over the clock-free assertion module.

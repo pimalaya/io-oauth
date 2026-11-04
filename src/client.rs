@@ -612,7 +612,6 @@ impl<T: Read + Write + Send + ?Sized> Oauth20Stream for T {}
 /// `200 OK` placeholder. The PKCE verifier and original state are the caller's
 /// to track.
 pub fn await_redirect(redirect_uri: &Url) -> Result<Url, Oauth20ClientStdError> {
-    let scheme = redirect_uri.scheme();
     let host = redirect_uri
         .host_str()
         .ok_or_else(|| Oauth20ClientStdError::UrlMissingHost(redirect_uri.to_string()))?;
@@ -621,6 +620,27 @@ pub fn await_redirect(redirect_uri: &Url) -> Result<Url, Oauth20ClientStdError> 
         .ok_or_else(|| Oauth20ClientStdError::UrlMissingPort(redirect_uri.to_string()))?;
 
     let listener = TcpListener::bind((host, port))?;
+    await_redirect_on(&listener, redirect_uri)
+}
+
+/// Waits on `listener` for the authorization redirect sent to
+/// `redirect_uri`, and returns the redirected URL.
+///
+/// The caller binds the listener, typically before handing out the
+/// authorization URL, so no other process can take the port in between.
+/// Single-shot, as [`await_redirect`].
+pub fn await_redirect_on(
+    listener: &TcpListener,
+    redirect_uri: &Url,
+) -> Result<Url, Oauth20ClientStdError> {
+    let scheme = redirect_uri.scheme();
+    let host = redirect_uri
+        .host_str()
+        .ok_or_else(|| Oauth20ClientStdError::UrlMissingHost(redirect_uri.to_string()))?;
+    let port = redirect_uri
+        .port_or_known_default()
+        .ok_or_else(|| Oauth20ClientStdError::UrlMissingPort(redirect_uri.to_string()))?;
+
     let (mut stream, _) = listener.accept()?;
     let mut reader = BufReader::new(&mut stream);
 
@@ -641,4 +661,42 @@ pub fn await_redirect(redirect_uri: &Url) -> Result<Url, Oauth20ClientStdError> 
     stream.shutdown(Shutdown::Both)?;
 
     Ok(redirected_uri)
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{format, string::String};
+    use std::{
+        io::{Read, Write},
+        net::{TcpListener, TcpStream},
+        thread,
+    };
+
+    use url::Url;
+
+    use super::await_redirect_on;
+
+    #[test]
+    fn a_caller_bound_listener_returns_the_redirect() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let redirect_uri: Url = format!("http://127.0.0.1:{port}/cb").parse().unwrap();
+
+        let browser = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream
+                .write_all(b"GET /cb?code=c&state=s HTTP/1.1\r\nHost: x\r\n\r\n")
+                .unwrap();
+            let mut answer = String::new();
+            stream.read_to_string(&mut answer).unwrap();
+            answer
+        });
+
+        let redirected = await_redirect_on(&listener, &redirect_uri).unwrap();
+        assert_eq!(
+            redirected.as_str(),
+            format!("http://127.0.0.1:{port}/cb?code=c&state=s")
+        );
+        assert!(browser.join().unwrap().starts_with("HTTP/1.0 200 OK"));
+    }
 }
