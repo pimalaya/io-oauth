@@ -15,7 +15,7 @@ The crate SHALL build the authorization URL from typed fields: client id, redire
 Extra parameters SHALL override equally-named typed defaults, and parameters already present in the endpoint URL SHALL take final precedence over both.
 
 ### Requirement: CSRF state
-The crate SHALL provide a random opaque state value of caller-chosen size, sent on the authorization request and echoed on the callback.
+The crate SHALL provide a random opaque state value of caller-chosen size, sent on the authorization request and echoed on the callback. The state SHALL hold exactly the requested number of VSCHAR characters, 32 by default.
 
 ### Requirement: Response validation
 Parsing the redirected URL SHALL yield either the authorization code or a typed error response. When the caller passes an expected state, validation SHALL fail on a missing state and on a mismatching one; when it passes none, the state SHALL NOT be checked.
@@ -35,4 +35,12 @@ The code SHALL be exchanged against the token endpoint with the authorization co
 The authorization request and the code exchange SHALL carry an optional list of RFC 8707 resource indicators, sent as one `resource` parameter each and omitted when empty. On the authorization URL, an extra parameter or an endpoint parameter named `resource` SHALL replace the typed list.
 
 ### Requirement: PKCE
-The crate SHALL generate a high-entropy code verifier of caller-chosen size, clamped to the 43 to 128 unreserved characters RFC 7636 section 4.1 allows, and derive the challenge under `plain` or `S256`, the latter being the base64url-encoded SHA-256 of the verifier.
+The crate SHALL generate a high-entropy code verifier of caller-chosen size, clamped to the 43 to 128 unreserved characters RFC 7636 section 4.1 allows, 43 by default, and derive the challenge under `plain` or `S256`, the latter being the base64url-encoded SHA-256 of the verifier. The verifier SHALL hold exactly the clamped number of characters.
+
+### Requirement: Random characters
+The CSRF state and the PKCE code verifier SHALL draw each character independently and uniformly from its alphabet out of the OS random source, rejecting the random bytes that would favour some characters, so characters may repeat. A failing OS random source SHALL panic, since generation returns no error.
+
+#### Scenario: Verifier longer than its alphabet
+- GIVEN a caller asking for a 128-character code verifier
+- WHEN the verifier is generated
+- THEN it holds 128 unreserved characters, some necessarily repeated

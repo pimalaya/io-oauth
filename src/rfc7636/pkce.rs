@@ -6,16 +6,15 @@
 
 use core::str::FromStr;
 
-#[cfg(feature = "client")]
-use alloc::boxed::Box;
 use alloc::{borrow::Cow, string::String, vec::Vec};
 
 use base64_codec::codec::{Base64Alphabet, Base64Codec};
 use log::debug;
-#[cfg(feature = "client")]
-use rand::seq::IndexedRandom;
 use secrecy::{ExposeSecret, SecretBox};
 use sha2::{Digest, Sha256};
+
+#[cfg(feature = "client")]
+use crate::random::random_chars;
 
 /// unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
 /// ALPHA = %x41-5A / %x61-7A
@@ -89,12 +88,13 @@ pub struct Oauth20PkceCodeVerifier(SecretBox<[u8]>);
 
 impl Oauth20PkceCodeVerifier {
     /// Generates a random verifier of `size` unreserved bytes (clamped 43-128).
+    ///
+    /// Panics when the OS random source fails.
     #[cfg(feature = "client")]
     pub fn new(size: u8) -> Self {
         // NOTE: code-verifier = 43*128unreserved
         let size = size.clamp(43, 128) as usize;
-
-        let random: Vec<u8> = UNRESERVED.sample(&mut rand::rng(), size).cloned().collect();
+        let random = random_chars(&UNRESERVED, size);
 
         Self(SecretBox::from(random))
     }
@@ -108,14 +108,11 @@ impl Oauth20PkceCodeVerifier {
 
 #[cfg(feature = "client")]
 impl Default for Oauth20PkceCodeVerifier {
+    /// Generates a random verifier of 43 unreserved bytes.
+    ///
+    /// Panics when the OS random source fails.
     fn default() -> Self {
-        // NOTE: code-verifier = 43*128unreserved
-        let random: [u8; 43] = UNRESERVED
-            .sample_array(&mut rand::rng())
-            // SAFETY: unreserved is not empty
-            .unwrap();
-
-        Self(SecretBox::new(Box::new(random)))
+        Self::new(43)
     }
 }
 
@@ -174,5 +171,31 @@ mod tests {
             challenge.encode(),
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         );
+    }
+
+    /// Longer than the 66-character alphabet, so characters repeat.
+    #[cfg(feature = "client")]
+    #[test]
+    fn a_128_byte_verifier_holds_128_unreserved_bytes() {
+        let verifier = Oauth20PkceCodeVerifier::new(128);
+
+        assert_eq!(verifier.expose().len(), 128);
+        assert!(verifier.expose().iter().all(|b| UNRESERVED.contains(b)));
+    }
+
+    #[cfg(feature = "client")]
+    #[test]
+    fn verifier_sizes_clamp_to_43_and_128() {
+        assert_eq!(Oauth20PkceCodeVerifier::new(0).expose().len(), 43);
+        assert_eq!(Oauth20PkceCodeVerifier::new(255).expose().len(), 128);
+    }
+
+    #[cfg(feature = "client")]
+    #[test]
+    fn the_default_verifier_holds_43_unreserved_bytes() {
+        let verifier = Oauth20PkceCodeVerifier::default();
+
+        assert_eq!(verifier.expose().len(), 43);
+        assert!(verifier.expose().iter().all(|b| UNRESERVED.contains(b)));
     }
 }

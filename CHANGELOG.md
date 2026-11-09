@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced rand with [getrandom](https://crates.io/crates/getrandom) for the state and PKCE code verifier generation.
+
+  The `client` feature no longer pulls rand, rand_core and chacha20.
+
+### Fixed
+
+- Fixed `rfc6749::state::Oauth20State` and `rfc7636::pkce::Oauth20PkceCodeVerifier` generation never repeating a character.
+
+  Each character is now drawn independently, so `new` honours sizes above the alphabet length: `Oauth20PkceCodeVerifier::new(128)` held 66 characters, `Oauth20State::new` stopped at 95.
+
 ## [0.5.1] - 2026-11-04
 
 ### Added

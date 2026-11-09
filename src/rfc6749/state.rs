@@ -6,17 +6,16 @@
 
 use core::fmt;
 
-#[cfg(feature = "client")]
-use alloc::{boxed::Box, vec::Vec};
 use alloc::{format, string::String};
 
-#[cfg(feature = "client")]
-use rand::seq::IndexedRandom;
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{Error, Visitor},
 };
+
+#[cfg(feature = "client")]
+use crate::random::random_chars;
 
 // NOTE: VSCHAR = %x20-7E
 const VSCHAR: [u8; 95] = [
@@ -40,13 +39,11 @@ pub struct Oauth20State(SecretBox<[u8]>);
 
 impl Oauth20State {
     /// Generates a new random state of custom size.
+    ///
+    /// Panics when the OS random source fails.
     #[cfg(feature = "client")]
     pub fn new(size: u8) -> Self {
-        let random: Vec<u8> = VSCHAR
-            .sample(&mut rand::rng(), size as usize)
-            .cloned()
-            .collect();
-
+        let random = random_chars(&VSCHAR, size as usize);
         Self(SecretBox::from(random))
     }
 
@@ -67,13 +64,11 @@ impl PartialEq for Oauth20State {
 
 #[cfg(feature = "client")]
 impl Default for Oauth20State {
+    /// Generates a random state of 32 VSCHAR bytes.
+    ///
+    /// Panics when the OS random source fails.
     fn default() -> Self {
-        let random: [u8; 32] = VSCHAR
-            .sample_array(&mut rand::rng())
-            // SAFETY: vschar is not empty
-            .unwrap();
-
-        Self(SecretBox::new(Box::new(random)))
+        Self::new(32)
     }
 }
 
@@ -113,5 +108,27 @@ impl<'de> Visitor<'de> for StateVisitor {
         }
 
         Ok(Oauth20State(SecretBox::from(bytes.to_vec())))
+    }
+}
+
+#[cfg(all(test, feature = "client"))]
+mod tests {
+    use crate::rfc6749::state::*;
+
+    /// Longer than the 95-character alphabet, so characters repeat.
+    #[test]
+    fn a_255_byte_state_holds_255_vschar_bytes() {
+        let state = Oauth20State::new(255);
+
+        assert_eq!(state.expose().len(), 255);
+        assert!(state.expose().iter().all(|b| VSCHAR.contains(b)));
+    }
+
+    #[test]
+    fn the_default_state_holds_32_vschar_bytes() {
+        let state = Oauth20State::default();
+
+        assert_eq!(state.expose().len(), 32);
+        assert!(state.expose().iter().all(|b| VSCHAR.contains(b)));
     }
 }

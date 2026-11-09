@@ -107,6 +107,8 @@ extern crate std;
 
 #[cfg(feature = "client")]
 pub mod client;
+#[cfg(feature = "client")]
+mod random;
 pub mod rfc6749;
 pub mod rfc7009;
 pub mod rfc7523;

@@ -18,7 +18,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["rustls-ring"]
-client = ["dep:rand", "rand/thread_rng"]
+client = ["dep:getrandom"]
 jwt-bearer = ["dep:rsa", "dep:sha1"]
 native-tls = ["client", "dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pimalaya-stream/std", "pimalaya-stream/native-tls", "io-http/native-tls"]
 rustls-aws = ["client", "dep:anyhow", "anyhow/std", "dep:pimalaya-stream", "pimalaya-stream/std", "pimalaya-stream/rustls-aws", "io-http/rustls-aws"]
@@ -48,10 +48,10 @@ rustls-platform-verifier = "0.7"
 [dependencies]
 anyhow = { version = "1", default-features = false, optional = true }
 base64-codec = { version = "0.1", default-features = false, features = ["alloc"] }
+getrandom = { version = "0.4", default-features = false, optional = true }
 io-http = { version = "0.6", default-features = false }
 log = { version = "0.4", default-features = false }
 pimalaya-stream = { version = "0.3", default-features = false, optional = true }
-rand = { version = "0.10", default-features = false, optional = true }
 rsa = { version = "0.10.0-rc.20", default-features = false, features = ["encoding"], optional = true }
 secrecy = { version = "0.10", default-features = false, features = ["serde"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
