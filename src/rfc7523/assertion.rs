@@ -23,7 +23,7 @@ use base64_codec::codec::{Base64Alphabet, Base64Codec};
 use log::{debug, trace};
 #[cfg(feature = "jwt-bearer")]
 use rsa::{
-    RsaPrivateKey,
+    PrivateKey,
     pkcs1::{self, DecodeRsaPrivateKey},
     pkcs1v15::SigningKey,
     pkcs8::{self, DecodePrivateKey},
@@ -184,14 +184,14 @@ impl Oauth20JwtBearerKey {
     /// (`-----BEGIN PRIVATE KEY-----`).
     pub fn from_pkcs8_pem(pem: &str) -> Result<Self, Oauth20JwtBearerKeyError> {
         Ok(Self {
-            key: SigningKey::new(RsaPrivateKey::from_pkcs8_pem(pem)?),
+            key: SigningKey::new(PrivateKey::from_pkcs8_pem(pem)?),
         })
     }
 
     /// Parses a signing key from PKCS#8 DER bytes.
     pub fn from_pkcs8_der(der: &[u8]) -> Result<Self, Oauth20JwtBearerKeyError> {
         Ok(Self {
-            key: SigningKey::new(RsaPrivateKey::from_pkcs8_der(der)?),
+            key: SigningKey::new(PrivateKey::from_pkcs8_der(der)?),
         })
     }
 
@@ -199,14 +199,14 @@ impl Oauth20JwtBearerKey {
     /// (`-----BEGIN RSA PRIVATE KEY-----`).
     pub fn from_pkcs1_pem(pem: &str) -> Result<Self, Oauth20JwtBearerKeyError> {
         Ok(Self {
-            key: SigningKey::new(RsaPrivateKey::from_pkcs1_pem(pem)?),
+            key: SigningKey::new(PrivateKey::from_pkcs1_pem(pem)?),
         })
     }
 
     /// Parses a signing key from PKCS#1 DER bytes.
     pub fn from_pkcs1_der(der: &[u8]) -> Result<Self, Oauth20JwtBearerKeyError> {
         Ok(Self {
-            key: SigningKey::new(RsaPrivateKey::from_pkcs1_der(der)?),
+            key: SigningKey::new(PrivateKey::from_pkcs1_der(der)?),
         })
     }
 
@@ -293,7 +293,7 @@ mod tests {
 
     use base64_codec::codec::{Base64Alphabet, Base64Codec};
     use rsa::{
-        RsaPrivateKey,
+        PrivateKey,
         pkcs1v15::{Signature, VerifyingKey},
         pkcs8::DecodePrivateKey,
         signature::Verifier,
@@ -337,7 +337,7 @@ Uz4xpoYU8cPObY7JmDznKvc=
 ";
 
     fn verifying_key() -> VerifyingKey<Sha256> {
-        let key = RsaPrivateKey::from_pkcs8_pem(KEY_PEM).unwrap();
+        let key = PrivateKey::from_pkcs8_pem(KEY_PEM).unwrap();
         VerifyingKey::new(key.to_public_key())
     }
 

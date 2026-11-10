@@ -52,7 +52,7 @@ getrandom = { version = "0.4", default-features = false, optional = true }
 io-http = { version = "0.6", default-features = false }
 log = { version = "0.4", default-features = false }
 pimalaya-stream = { version = "0.3", default-features = false, optional = true }
-rsa = { version = "0.10.0-rc.20", default-features = false, features = ["encoding"], optional = true }
+rsa = { version = "0.10", default-features = false, features = ["encoding", "pkcs1v15"], optional = true }
 secrecy = { version = "0.10", default-features = false, features = ["serde"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

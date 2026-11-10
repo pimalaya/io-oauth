@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
   The `client` feature no longer pulls rand, rand_core and chacha20.
 
+- Bumped rsa to 0.10.0, its first stable release, outside the RUSTSEC-2023-0071 range the release candidates fell in (the `jwt-bearer` feature).
+
 ### Fixed
 
 - Fixed `rfc6749::state::Oauth20State` and `rfc7636::pkce::Oauth20PkceCodeVerifier` generation never repeating a character.
