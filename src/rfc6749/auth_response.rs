@@ -1,7 +1,7 @@
 //! Authorization response (RFC 6749 section 4.1.2).
 //!
 //! Parses the redirected URL back into an authorization code or an
-//! error, and validates the echoed CSRF state.
+//! error, and validates the echoed CSRF state and the RFC 9207 issuer.
 
 use core::fmt;
 
@@ -31,13 +31,24 @@ impl<'a> Oauth20AuthParams<'a> {
     /// When `expected_state` is `Some`, the response must carry a matching
     /// state (CSRF protection per RFC 6749 §10.12); when `None`, the state
     /// field is not checked.
+    ///
+    /// When `expected_issuer` is `Some`, a code from a response naming another
+    /// issuer is refused (mix-up defence per RFC 9207 §2.4). Issuers are
+    /// compared as strings, and a response naming none passes.
     pub fn validate(
         self,
         expected_state: Option<&Oauth20State>,
+        expected_issuer: Option<&str>,
     ) -> Result<Cow<'a, str>, Oauth20AuthParamsValidationError<'a>> {
         match self {
             Self::Error(err) => Err(Oauth20AuthParamsValidationError::Server(err)),
             Self::Success(success) => {
+                if let (Some(expected), Some(got)) = (expected_issuer, success.iss)
+                    && expected != got
+                {
+                    return Err(Oauth20AuthParamsValidationError::IssuerMismatch(got));
+                }
+
                 if let Some(expected) = expected_state {
                     match &success.state {
                         None => return Err(Oauth20AuthParamsValidationError::StateMissing),
@@ -66,12 +77,16 @@ pub enum Oauth20AuthParamsValidationError<'a> {
     /// one (CSRF mismatch).
     #[error("Authorization state mismatch")]
     StateMismatch,
+    /// The response names another issuer than the expected one (mix-up).
+    #[error("Authorization response issued by `{0}`, not by the expected server")]
+    IssuerMismatch(Cow<'a, str>),
 }
 
 impl<'a> From<&'a Url> for Oauth20AuthParams<'a> {
     fn from(url: &'a Url) -> Self {
         let mut code = None;
         let mut state = None;
+        let mut iss = None;
 
         let mut error = None;
         let mut error_description = None;
@@ -88,6 +103,9 @@ impl<'a> From<&'a Url> for Oauth20AuthParams<'a> {
                         Ok(valid_state) => state = Some(Cow::Owned(valid_state)),
                         Err(err) => debug!("skip invalid state: {err}"),
                     }
+                }
+                key if key.eq_ignore_ascii_case("iss") => {
+                    iss = Some(val);
                 }
                 key if key.eq_ignore_ascii_case("error") => {
                     let deserializer = CowStrDeserializer::<Error>::new(val);
@@ -111,7 +129,7 @@ impl<'a> From<&'a Url> for Oauth20AuthParams<'a> {
         }
 
         if let Some(code) = code {
-            let params = Oauth20AuthSuccessParams { code, state };
+            let params = Oauth20AuthSuccessParams { code, state, iss };
             return Oauth20AuthParams::Success(params);
         }
 
@@ -138,6 +156,10 @@ pub struct Oauth20AuthSuccessParams<'a> {
     ///
     /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-10.12>
     pub state: Option<Cow<'a, Oauth20State>>,
+    /// The issuer of the response, when the server names one.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc9207#section-2>
+    pub iss: Option<Cow<'a, str>>,
 }
 
 /// The error authorization response, when the request is denied or fails.
@@ -195,4 +217,57 @@ pub enum Oauth20AuthErrorCode {
     /// Any unregistered code, kept for provider-specific extensions.
     #[serde(other)]
     Unknown,
+}
+
+#[cfg(test)]
+mod tests {
+    use url::Url;
+
+    use crate::rfc6749::{auth_response::*, state::Oauth20State};
+
+    const ISSUER: Option<&str> = Some("https://as.test");
+
+    fn redirected(query: &str) -> Url {
+        let mut url = Url::parse("http://127.0.0.1/cb").unwrap();
+        url.set_query(Some(query));
+        url
+    }
+
+    #[test]
+    fn a_response_naming_the_expected_issuer_returns_the_code() {
+        let url = redirected("code=c&state=s&iss=https%3A%2F%2Fas.test");
+        let state = Oauth20State::try_from(&b"s"[..]).unwrap();
+        let validated = Oauth20AuthParams::from(&url).validate(Some(&state), ISSUER);
+
+        assert_eq!(validated.unwrap(), "c");
+    }
+
+    #[test]
+    fn a_response_naming_no_issuer_returns_the_code() {
+        let url = redirected("code=c&state=s");
+        let state = Oauth20State::try_from(&b"s"[..]).unwrap();
+        let validated = Oauth20AuthParams::from(&url).validate(Some(&state), ISSUER);
+
+        assert_eq!(validated.unwrap(), "c");
+    }
+
+    #[test]
+    fn a_response_naming_another_issuer_is_refused() {
+        let url = redirected("code=c&state=s&iss=https%3A%2F%2Fevil.test");
+        let state = Oauth20State::try_from(&b"s"[..]).unwrap();
+        let validated = Oauth20AuthParams::from(&url).validate(Some(&state), ISSUER);
+
+        assert!(matches!(
+            validated,
+            Err(Oauth20AuthParamsValidationError::IssuerMismatch(iss)) if iss == "https://evil.test"
+        ));
+    }
+
+    #[test]
+    fn an_issuer_is_not_checked_without_an_expected_one() {
+        let url = redirected("code=c&iss=https%3A%2F%2Fevil.test");
+        let validated = Oauth20AuthParams::from(&url).validate(None, None);
+
+        assert_eq!(validated.unwrap(), "c");
+    }
 }

@@ -57,11 +57,7 @@
 
 use core::fmt;
 
-use alloc::{
-    borrow::Cow,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{borrow::Cow, string::String, vec::Vec};
 
 use io_http::{
     coroutine::*,
@@ -142,11 +138,11 @@ impl<'a> Oauth20AccessTokenRequestParams<'a> {
 
         serializer
     }
-}
 
-impl fmt::Display for Oauth20AccessTokenRequestParams<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_form_url_encoded_serializer().finish())
+    /// Builds the form-urlencoded request body.
+    // SAFETY: exposes the code, the client secret and the PKCE code verifier
+    pub fn to_body(&self) -> Vec<u8> {
+        self.to_form_url_encoded_serializer().finish().into_bytes()
     }
 }
 
@@ -159,6 +155,9 @@ pub enum Oauth20AccessTokenRequestError {
     /// The HTTP response could not be parsed.
     #[error(transparent)]
     ParseHttpResponse(#[from] serde_json::Error),
+    /// The server answered an error status without an OAuth error body.
+    #[error("Unexpected access token status {0}")]
+    Status(u16),
     /// The server answered with an unexpected redirection.
     #[error("Unexpected redirection {code} to {url}")]
     Redirect {
@@ -186,9 +185,15 @@ pub enum Oauth20AccessTokenRequestResult {
 /// token.
 ///
 /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-4.1>
-#[derive(Debug)]
 pub struct Oauth20AccessTokenRequest {
     send: Http11Send,
+}
+
+impl fmt::Debug for Oauth20AccessTokenRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Oauth20AccessTokenRequest")
+            .finish_non_exhaustive()
+    }
 }
 
 impl Oauth20AccessTokenRequest {
@@ -199,7 +204,7 @@ impl Oauth20AccessTokenRequest {
 
         let request = request
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body.to_string().into_bytes());
+            .body(body.to_body());
 
         Self {
             send: Http11Send::new(request),
@@ -229,7 +234,10 @@ impl Oauth20AccessTokenRequest {
 
                 match Oauth20AccessTokenErrorParams::try_from(response.body.as_slice()) {
                     Ok(res) => Oauth20AccessTokenRequestResult::Ok(Err(res)),
-                    Err(err) => Oauth20AccessTokenRequestResult::Err(err.into()),
+                    Err(_) => {
+                        let err = Oauth20AccessTokenRequestError::Status(*response.status);
+                        Oauth20AccessTokenRequestResult::Err(err)
+                    }
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
@@ -253,11 +261,111 @@ impl Oauth20AccessTokenRequest {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, vec};
+    use alloc::{format, string::String, vec, vec::Vec};
 
+    use io_http::rfc9110::request::HttpRequest;
     use url::Url;
 
-    use crate::rfc6749::access_token_request::*;
+    use crate::rfc6749::{access_token_request::*, issue_access_token::*};
+
+    fn coroutine(code: &'static str) -> Oauth20AccessTokenRequest {
+        let request = HttpRequest {
+            method: "POST".into(),
+            url: Url::parse("https://example.test/token").unwrap(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+
+        let params = Oauth20AccessTokenRequestParams {
+            code: code.into(),
+            redirect_uri: None,
+            client_id: "client".into(),
+            client_secret: None,
+            pkce_code_verifier: None,
+            resource: Vec::new(),
+        };
+
+        Oauth20AccessTokenRequest::new(request, params)
+    }
+
+    fn exchange(status: &str, body: &str) -> Oauth20AccessTokenRequestResult {
+        let len = body.len();
+        let response = format!("HTTP/1.1 {status}\r\nContent-Length: {len}\r\n\r\n{body}");
+        let mut coroutine = coroutine("code");
+        let mut arg = None;
+
+        loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20AccessTokenRequestResult::WantsWrite(_) => {}
+                Oauth20AccessTokenRequestResult::WantsRead => arg = Some(response.as_bytes()),
+                result => return result,
+            }
+        }
+    }
+
+    #[test]
+    fn a_number_lifetime_is_kept() {
+        let body = r#"{"access_token":"t","token_type":"example","expires_in":3600}"#;
+
+        let Oauth20AccessTokenRequestResult::Ok(Ok(res)) = exchange("200 OK", body) else {
+            panic!("expected a token");
+        };
+
+        assert_eq!(res.token_type, "example");
+        assert_eq!(res.expires_in, Some(3600));
+    }
+
+    #[test]
+    fn a_numeric_string_lifetime_is_accepted() {
+        let body = r#"{"access_token":"t","token_type":"Bearer","expires_in":"3600"}"#;
+
+        let Oauth20AccessTokenRequestResult::Ok(Ok(res)) = exchange("200 OK", body) else {
+            panic!("expected a token");
+        };
+
+        assert_eq!(res.expires_in, Some(3600));
+    }
+
+    #[test]
+    fn a_missing_token_type_defaults_to_bearer() {
+        let body = r#"{"access_token":"t","refresh_token":"r"}"#;
+
+        let Oauth20AccessTokenRequestResult::Ok(Ok(res)) = exchange("200 OK", body) else {
+            panic!("expected a token");
+        };
+
+        assert_eq!(res.token_type, "Bearer");
+        assert_eq!(res.expires_in, None);
+    }
+
+    #[test]
+    fn an_oauth_error_body_returns_its_code() {
+        let result = exchange("400 Bad Request", r#"{"error":"invalid_grant"}"#);
+
+        let Oauth20AccessTokenRequestResult::Ok(Err(err)) = result else {
+            panic!("expected an error response");
+        };
+
+        assert_eq!(err.error, Oauth20AccessTokenErrorCode::InvalidGrant);
+    }
+
+    #[test]
+    fn an_error_status_without_oauth_body_returns_its_status() {
+        let result = exchange("503 Service Unavailable", "<html>down</html>");
+
+        assert!(matches!(
+            result,
+            Oauth20AccessTokenRequestResult::Err(Oauth20AccessTokenRequestError::Status(503))
+        ));
+    }
+
+    #[test]
+    fn debug_hides_the_request_body() {
+        let debug = format!("{:?}", coroutine("s3cr3t-code"));
+        let bytes = format!("{:?}", b"s3cr3t-code");
+
+        assert!(!debug.contains(bytes.trim_matches(['[', ']'])), "{debug}");
+    }
 
     #[test]
     fn every_resource_is_its_own_body_pair() {
@@ -274,7 +382,7 @@ mod tests {
         };
 
         assert_eq!(
-            params.to_string(),
+            String::from_utf8(params.to_body()).unwrap(),
             "grant_type=authorization_code&code=code&client_id=client\
              &resource=https%3A%2F%2Fapi.example.test%2Fjmap\
              &resource=https%3A%2F%2Fdav.example.test%2F"

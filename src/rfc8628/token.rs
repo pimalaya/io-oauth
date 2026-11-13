@@ -54,13 +54,7 @@
 //! # let _ = response;
 //! ```
 
-use core::fmt;
-
-use alloc::{
-    borrow::Cow,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{borrow::Cow, string::String, vec::Vec};
 
 use io_http::{
     coroutine::*,
@@ -89,6 +83,9 @@ pub enum Oauth20DeviceAccessTokenRequestError {
     /// The HTTP response could not be parsed.
     #[error(transparent)]
     ParseHttpResponse(#[from] serde_json::Error),
+    /// The server answered an error status without an OAuth error body.
+    #[error("Unexpected device access token status {0}")]
+    Status(u16),
     /// The server answered with an unexpected redirection.
     #[error("Unexpected redirection {code} to {url}")]
     Redirect {
@@ -132,7 +129,7 @@ impl Oauth20DeviceAccessTokenRequest {
 
         let request = request
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body.to_string().into_bytes());
+            .body(body.to_body());
 
         Self {
             send: Http11Send::new(request),
@@ -162,7 +159,10 @@ impl Oauth20DeviceAccessTokenRequest {
 
                 match Oauth20AccessTokenErrorParams::try_from(response.body.as_slice()) {
                     Ok(res) => Oauth20DeviceAccessTokenRequestResult::Ok(Err(res)),
-                    Err(err) => Oauth20DeviceAccessTokenRequestResult::Err(err.into()),
+                    Err(_) => {
+                        let err = Oauth20DeviceAccessTokenRequestError::Status(*response.status);
+                        Oauth20DeviceAccessTokenRequestResult::Err(err)
+                    }
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
@@ -211,10 +211,54 @@ impl<'a> Oauth20DeviceAccessTokenRequestParams<'a> {
 
         serializer
     }
+
+    /// Builds the form-urlencoded request body.
+    // SAFETY: exposes the device code
+    pub fn to_body(&self) -> Vec<u8> {
+        self.to_serializer().finish().into_bytes()
+    }
 }
 
-impl fmt::Display for Oauth20DeviceAccessTokenRequestParams<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_serializer().finish())
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use io_http::rfc9110::request::HttpRequest;
+    use url::Url;
+
+    use crate::rfc8628::token::*;
+
+    #[test]
+    fn an_error_status_without_oauth_body_returns_its_status() {
+        let request = HttpRequest {
+            method: "POST".into(),
+            url: Url::parse("https://example.test/token").unwrap(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+
+        let params = Oauth20DeviceAccessTokenRequestParams {
+            client_id: "client".into(),
+            device_code: "device".into(),
+        };
+
+        let mut coroutine = Oauth20DeviceAccessTokenRequest::new(request, params);
+        let response = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
+        let mut arg = None;
+
+        let result = loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20DeviceAccessTokenRequestResult::WantsWrite(_) => {}
+                Oauth20DeviceAccessTokenRequestResult::WantsRead => arg = Some(response.as_slice()),
+                result => break result,
+            }
+        };
+
+        assert!(matches!(
+            result,
+            Oauth20DeviceAccessTokenRequestResult::Err(
+                Oauth20DeviceAccessTokenRequestError::Status(503)
+            )
+        ));
     }
 }

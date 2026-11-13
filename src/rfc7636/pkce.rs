@@ -9,9 +9,9 @@ use core::str::FromStr;
 use alloc::{borrow::Cow, string::String, vec::Vec};
 
 use base64_codec::codec::{Base64Alphabet, Base64Codec};
-use log::debug;
 use secrecy::{ExposeSecret, SecretBox};
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 
 #[cfg(feature = "client")]
 use crate::random::random_chars;
@@ -19,7 +19,7 @@ use crate::random::random_chars;
 /// unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
 /// ALPHA = %x41-5A / %x61-7A
 /// DIGIT = %x30-39
-const UNRESERVED: [u8; 66] = [
+pub(crate) const UNRESERVED: [u8; 66] = [
     0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50,
     0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
     0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76,
@@ -99,6 +99,15 @@ impl Oauth20PkceCodeVerifier {
         Self(SecretBox::from(random))
     }
 
+    /// Builds a verifier out of 32 random bytes the caller drew.
+    ///
+    /// The bytes are base64url-encoded into 43 characters.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc7636#section-4.1>
+    pub fn from_entropy(entropy: &[u8; 32]) -> Self {
+        Self(SecretBox::from(base64url(entropy).into_bytes()))
+    }
+
     /// Exposes the code verifier.
     // SAFETY: this function exposes the code verifier
     pub fn expose(&self) -> &[u8] {
@@ -116,21 +125,42 @@ impl Default for Oauth20PkceCodeVerifier {
     }
 }
 
-impl FromStr for Oauth20PkceCodeVerifier {
-    type Err = u8;
+impl TryFrom<&[u8]> for Oauth20PkceCodeVerifier {
+    type Error = Oauth20PkceCodeVerifierError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = s.as_bytes();
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        // NOTE: code-verifier = 43*128unreserved
+        if !(43..=128).contains(&bytes.len()) {
+            return Err(Oauth20PkceCodeVerifierError::InvalidLength(bytes.len()));
+        }
 
         for b in bytes {
             if !UNRESERVED.contains(b) {
-                debug!("invalid byte 0x{b:x} found in PKCE code challenge");
-                return Err(*b);
+                return Err(Oauth20PkceCodeVerifierError::InvalidByte(*b));
             }
         }
 
         Ok(Self(SecretBox::from(bytes.to_vec())))
     }
+}
+
+impl FromStr for Oauth20PkceCodeVerifier {
+    type Err = Oauth20PkceCodeVerifierError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s.as_bytes())
+    }
+}
+
+/// Errors returned when building a PKCE code verifier out of bytes.
+#[derive(Clone, Debug, Eq, PartialEq, Error)]
+pub enum Oauth20PkceCodeVerifierError {
+    /// The verifier is not 43 to 128 bytes long.
+    #[error("Invalid PKCE code verifier length {0}, expected 43 to 128")]
+    InvalidLength(usize),
+    /// The verifier holds a byte outside the unreserved set.
+    #[error("Invalid PKCE code verifier byte 0x{0:x}")]
+    InvalidByte(u8),
 }
 
 /// Encodes `bytes` in unpadded base64url, as the `S256` challenge needs.
@@ -170,6 +200,49 @@ mod tests {
         assert_eq!(
             challenge.encode(),
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
+    }
+
+    #[test]
+    fn a_verifier_shorter_than_43_bytes_is_refused() {
+        let verifier = Oauth20PkceCodeVerifier::from_str(&"a".repeat(42));
+        let err = Oauth20PkceCodeVerifierError::InvalidLength(42);
+
+        assert_eq!(verifier.err(), Some(err));
+    }
+
+    #[test]
+    fn a_verifier_longer_than_128_bytes_is_refused() {
+        let verifier = Oauth20PkceCodeVerifier::from_str(&"a".repeat(129));
+        let err = Oauth20PkceCodeVerifierError::InvalidLength(129);
+
+        assert_eq!(verifier.err(), Some(err));
+    }
+
+    #[test]
+    fn a_verifier_byte_outside_unreserved_is_refused() {
+        let mut bytes = [b'a'; 43];
+        bytes[7] = b'+';
+
+        let verifier = Oauth20PkceCodeVerifier::try_from(&bytes[..]);
+        let err = Oauth20PkceCodeVerifierError::InvalidByte(b'+');
+
+        assert_eq!(verifier.err(), Some(err));
+    }
+
+    /// The RFC 7636 Appendix B octets and the verifier they encode to.
+    #[test]
+    fn entropy_becomes_the_rfc_example_verifier() {
+        let entropy = [
+            116, 24, 223, 180, 151, 153, 224, 37, 79, 250, 96, 125, 216, 173, 187, 186, 22, 212,
+            37, 77, 105, 214, 191, 240, 91, 88, 5, 88, 83, 132, 141, 121,
+        ];
+
+        let verifier = Oauth20PkceCodeVerifier::from_entropy(&entropy);
+
+        assert_eq!(
+            verifier.expose(),
+            b"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
         );
     }
 

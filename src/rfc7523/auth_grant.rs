@@ -60,14 +60,7 @@
 //! # let _ = response;
 //! ```
 
-use core::fmt;
-
-use alloc::{
-    borrow::Cow,
-    collections::BTreeSet,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{borrow::Cow, collections::BTreeSet, string::String, vec::Vec};
 
 use io_http::{
     coroutine::*,
@@ -130,11 +123,11 @@ impl<'a> Oauth20JwtBearerGrantRequestParams<'a> {
 
         serializer
     }
-}
 
-impl fmt::Display for Oauth20JwtBearerGrantRequestParams<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_serializer().finish())
+    /// Builds the form-urlencoded request body.
+    // SAFETY: exposes the assertion
+    pub fn to_body(&self) -> Vec<u8> {
+        self.to_serializer().finish().into_bytes()
     }
 }
 
@@ -147,6 +140,9 @@ pub enum Oauth20JwtBearerGrantRequestError {
     /// The HTTP response could not be parsed.
     #[error(transparent)]
     ParseHttpResponse(#[from] serde_json::Error),
+    /// The server answered an error status without an OAuth error body.
+    #[error("Unexpected JWT bearer grant status {0}")]
+    Status(u16),
     /// The server answered with an unexpected redirection.
     #[error("Unexpected redirection {code} to {url}")]
     Redirect {
@@ -189,7 +185,7 @@ impl Oauth20JwtBearerGrantRequest {
 
         let request = request
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body.to_string().into_bytes());
+            .body(body.to_body());
 
         Self {
             send: Http11Send::new(request),
@@ -219,7 +215,10 @@ impl Oauth20JwtBearerGrantRequest {
 
                 match Oauth20AccessTokenErrorParams::try_from(response.body.as_slice()) {
                     Ok(res) => Oauth20JwtBearerGrantRequestResult::Ok(Err(res)),
-                    Err(err) => Oauth20JwtBearerGrantRequestResult::Err(err.into()),
+                    Err(_) => {
+                        let err = Oauth20JwtBearerGrantRequestError::Status(*response.status);
+                        Oauth20JwtBearerGrantRequestResult::Err(err)
+                    }
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
@@ -245,9 +244,44 @@ impl Oauth20JwtBearerGrantRequest {
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::ToString;
+    use alloc::{string::String, vec::Vec};
+
+    use io_http::rfc9110::request::HttpRequest;
+    use url::Url;
 
     use crate::rfc7523::auth_grant::*;
+
+    #[test]
+    fn an_error_status_without_oauth_body_returns_its_status() {
+        let request = HttpRequest {
+            method: "POST".into(),
+            url: Url::parse("https://example.test/token").unwrap(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+
+        let params = Oauth20JwtBearerGrantRequestParams {
+            assertion: "aaa.bbb.ccc".into(),
+            scope: Default::default(),
+        };
+
+        let mut coroutine = Oauth20JwtBearerGrantRequest::new(request, params);
+        let response = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
+        let mut arg = None;
+
+        let result = loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20JwtBearerGrantRequestResult::WantsWrite(_) => {}
+                Oauth20JwtBearerGrantRequestResult::WantsRead => arg = Some(response.as_slice()),
+                result => break result,
+            }
+        };
+
+        assert!(matches!(
+            result,
+            Oauth20JwtBearerGrantRequestResult::Err(Oauth20JwtBearerGrantRequestError::Status(503))
+        ));
+    }
 
     #[test]
     fn params_serialize_to_form_body() {
@@ -257,7 +291,7 @@ mod tests {
         };
 
         assert_eq!(
-            params.to_string(),
+            String::from_utf8(params.to_body()).unwrap(),
             "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer\
              &scope=https%3A%2F%2Fmail.google.com%2F\
              &assertion=aaa.bbb.ccc"
@@ -272,7 +306,7 @@ mod tests {
         };
 
         assert_eq!(
-            params.to_string(),
+            String::from_utf8(params.to_body()).unwrap(),
             "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer\
              &assertion=aaa.bbb.ccc"
         );

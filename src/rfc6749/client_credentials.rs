@@ -127,6 +127,9 @@ pub enum Oauth20ClientCredentialsRequestError {
     /// The HTTP response could not be parsed.
     #[error(transparent)]
     ParseHttpResponse(#[from] serde_json::Error),
+    /// The server answered an error status without an OAuth error body.
+    #[error("Unexpected client credentials status {0}")]
+    Status(u16),
     /// The server answered with an unexpected redirection.
     #[error("Unexpected redirection {code} to {url}")]
     Redirect {
@@ -199,7 +202,10 @@ impl Oauth20ClientCredentialsRequest {
 
                 match Oauth20AccessTokenErrorParams::try_from(response.body.as_slice()) {
                     Ok(res) => Oauth20ClientCredentialsRequestResult::Ok(Err(res)),
-                    Err(err) => Oauth20ClientCredentialsRequestResult::Err(err.into()),
+                    Err(_) => {
+                        let err = Oauth20ClientCredentialsRequestError::Status(*response.status);
+                        Oauth20ClientCredentialsRequestResult::Err(err)
+                    }
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
@@ -220,5 +226,45 @@ impl Oauth20ClientCredentialsRequest {
                 Oauth20ClientCredentialsRequestResult::Err(err.into())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use io_http::rfc9110::request::HttpRequest;
+    use url::Url;
+
+    use crate::rfc6749::client_credentials::*;
+
+    #[test]
+    fn an_error_status_without_oauth_body_returns_its_status() {
+        let request = HttpRequest {
+            method: "POST".into(),
+            url: Url::parse("https://example.test/token").unwrap(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+
+        let params = Oauth20ClientCredentialsRequestParams::default();
+        let mut coroutine = Oauth20ClientCredentialsRequest::new(request, params);
+        let response = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
+        let mut arg = None;
+
+        let result = loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20ClientCredentialsRequestResult::WantsWrite(_) => {}
+                Oauth20ClientCredentialsRequestResult::WantsRead => arg = Some(response.as_slice()),
+                result => break result,
+            }
+        };
+
+        assert!(matches!(
+            result,
+            Oauth20ClientCredentialsRequestResult::Err(
+                Oauth20ClientCredentialsRequestError::Status(503)
+            )
+        ));
     }
 }

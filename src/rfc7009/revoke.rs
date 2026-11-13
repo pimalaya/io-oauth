@@ -49,8 +49,6 @@
 //! # let _ = response;
 //! ```
 
-use core::fmt;
-
 use alloc::{
     string::{String, ToString},
     vec::Vec,
@@ -124,7 +122,7 @@ impl Oauth20TokenRevoke {
 
         let request = request
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body.to_string().into_bytes());
+            .body(body.to_body());
 
         Self {
             send: Http11Send::new(request),
@@ -218,11 +216,11 @@ impl Oauth20TokenRevokeParams {
 
         serializer
     }
-}
 
-impl fmt::Display for Oauth20TokenRevokeParams {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_serializer().finish())
+    /// Builds the form-urlencoded request body.
+    // SAFETY: exposes the token and the client secret
+    pub fn to_body(&self) -> Vec<u8> {
+        self.to_serializer().finish().into_bytes()
     }
 }
 
@@ -289,7 +287,7 @@ pub enum Oauth20TokenRevokeErrorCode {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, vec::Vec};
+    use alloc::{string::String, vec::Vec};
 
     use io_http::rfc9110::request::HttpRequest;
     use url::Url;
@@ -324,7 +322,7 @@ mod tests {
         params.token_type_hint = Some(Oauth20TokenTypeHint::RefreshToken);
 
         assert_eq!(
-            params.to_string(),
+            String::from_utf8(params.to_body()).unwrap(),
             "token=tok+en&token_type_hint=refresh_token&client_id=client"
         );
     }

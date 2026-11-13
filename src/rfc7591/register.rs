@@ -203,6 +203,9 @@ pub enum Oauth20ClientRegisterError {
     /// The HTTP response could not be parsed.
     #[error(transparent)]
     ParseHttpResponse(#[from] serde_json::Error),
+    /// The server answered an error status without an OAuth error body.
+    #[error("Unexpected client registration status {0}")]
+    Status(u16),
     /// The server answered with an unexpected redirection.
     #[error("Unexpected redirection {code} to {url}")]
     Redirect {
@@ -276,7 +279,10 @@ impl Oauth20ClientRegister {
 
                 match Oauth20ClientRegisterErrorParams::try_from(response.body.as_slice()) {
                     Ok(err) => Oauth20ClientRegisterResult::Ok(Err(err)),
-                    Err(err) => Oauth20ClientRegisterResult::Err(err.into()),
+                    Err(_) => {
+                        let err = Oauth20ClientRegisterError::Status(*response.status);
+                        Oauth20ClientRegisterResult::Err(err)
+                    }
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
@@ -298,9 +304,40 @@ impl Oauth20ClientRegister {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::String, vec};
+    use alloc::{string::String, vec, vec::Vec};
+
+    use io_http::rfc9110::request::HttpRequest;
+    use url::Url;
 
     use crate::rfc7591::register::*;
+
+    #[test]
+    fn an_error_status_without_oauth_body_returns_its_status() {
+        let request = HttpRequest {
+            method: "POST".into(),
+            url: Url::parse("https://example.test/register").unwrap(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+
+        let params = Oauth20ClientRegisterParams::default();
+        let mut coroutine = Oauth20ClientRegister::new(request, &params).unwrap();
+        let response = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
+        let mut arg = None;
+
+        let result = loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20ClientRegisterResult::WantsWrite(_) => {}
+                Oauth20ClientRegisterResult::WantsRead => arg = Some(response.as_slice()),
+                result => break result,
+            }
+        };
+
+        assert!(matches!(
+            result,
+            Oauth20ClientRegisterResult::Err(Oauth20ClientRegisterError::Status(503))
+        ));
+    }
 
     #[test]
     fn params_serialize_without_empty_fields() {

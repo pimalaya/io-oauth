@@ -10,18 +10,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Added `rfc8628::auth::Oauth20DeviceAuthSuccessParams::lifetime`, the device code lifetime capped at one hour.
 - Added `rfc8628::auth::Oauth20DeviceAuthSuccessParams::poll_interval`, the polling interval kept between 1 and 60 seconds.
+- Added `rfc6749::state::Oauth20State::from_entropy`, building a state from 32 random bytes of the caller.
+- Added `rfc7636::pkce::Oauth20PkceCodeVerifier::from_entropy`, building a verifier from 32 random bytes of the caller (RFC 7636 section 4.1).
+- Added `TryFrom<&[u8]>` for `rfc6749::state::Oauth20State`, failing with `Oauth20StateError`.
+- Added `TryFrom<&[u8]>` for `rfc7636::pkce::Oauth20PkceCodeVerifier`, failing with `Oauth20PkceCodeVerifierError`.
+- Added `to_body` to the request params of `rfc6749::access_token_request`, `rfc6749::refresh_access_token`, `rfc7009::revoke`, `rfc7523::auth_grant`, `rfc7523::client_auth` and `rfc8628::token`, building the form body.
 
 ### Changed
 
-- Changed `client::await_redirect` and `client::await_redirect_on` to wait for a `GET` to the redirect path carrying a `code` or an `error`.
+- **BREAKING**: Changed `client::await_redirect` and `client::await_redirect_on` to take the expected state and to wait for the authorization redirect only.
 
-  Any other connection is answered `404 Not Found` and dropped, after at most 5 seconds and an 8 KiB request line. The `200 OK` page no longer claims a success.
+  The wait ends on a `GET` to the redirect path carrying a `code` or an `error`, and echoing the state when one is given. Any other connection is answered `404 Not Found` and dropped, after at most 5 seconds and an 8 KiB request line. The `200 OK` page no longer claims a success.
+
+- **BREAKING**: Changed `rfc6749::auth_response::Oauth20AuthParams::validate` to take the expected issuer (RFC 9207).
+
+  A code from a response naming another issuer fails with the new `Oauth20AuthParamsValidationError::IssuerMismatch`. `Oauth20AuthSuccessParams` carries the `iss` parameter.
+
+- **BREAKING**: Changed a non-success status without an OAuth error body to end in a new `Status(u16)` error, in the access token, refresh, client credentials, device, JWT bearer and registration coroutines.
+
+  It ended in `ParseHttpResponse`, the status lost.
+
+- **BREAKING**: Changed `expires_in` of `rfc6749::issue_access_token::Oauth20AccessTokenSuccessParams` to `Option<u64>`, read from a number or from a numeric string.
+- Changed `token_type` of `rfc6749::issue_access_token::Oauth20AccessTokenSuccessParams` to default to `Bearer` when the server sends none.
+- **BREAKING**: Changed `FromStr` for `rfc7636::pkce::Oauth20PkceCodeVerifier` to refuse a verifier outside 43 to 128 characters.
+
+  Its error is `Oauth20PkceCodeVerifierError` instead of the offending byte.
+
+- Changed `rfc6749::state::Oauth20State` generation to the unreserved characters.
+
+  An empty state no longer deserializes.
 
 ### Removed
 
 - **BREAKING**: Removed `client::Oauth20ClientStdError::InvalidRedirectRequest`.
 
   A malformed request no longer ends the wait on the redirect.
+
+- **BREAKING**: Removed `Display` from the request params carrying a secret, the six that gained `to_body`.
 
 ### Fixed
 
@@ -32,6 +57,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed `rfc6749::issue_access_token::parse_http_date` overflowing on a day zero or a date before 1970.
 
   It returns `None`, where a release build returned a wrapped date.
+
+- Fixed `client::Oauth20ClientStd` sending the client id and secret of its Basic credentials without the form encoding of RFC 6749 section 2.3.1.
+
+  Letters, digits and `*-._~` stay literal, `~` included although the form encoding escapes it: a server comparing the raw credentials only knows the literal one. An id or a secret made of these characters is unchanged on the wire.
+
+- Fixed `Debug` on `rfc6749::access_token_request::Oauth20AccessTokenRequest` printing the pending request, code and client secret included.
 
 ## [0.5.2] - 2026-11-11
 

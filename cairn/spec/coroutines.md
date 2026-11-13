@@ -22,6 +22,14 @@ A `resume` step SHALL return the coroutine's own `Result`-suffixed enum, carryin
 ### Requirement: Redirects are errors
 An unexpected 3xx SHALL surface as a redirect error carrying the target URL and the status code. A coroutine SHALL NOT follow a redirect itself.
 
+### Requirement: Error status without an OAuth body
+A non-success status whose body is not the OAuth error object SHALL surface, in every coroutine, as an error carrying the status code, so a caller tells a 503 or a 429 from a malformed reply. A success status whose body does not parse SHALL stay a parse error.
+
+#### Scenario: Gateway answers in HTML
+- GIVEN a caller pumping a token exchange
+- WHEN the endpoint answers 503 with an HTML page
+- THEN the coroutine ends with an error carrying 503
+
 ### Requirement: One exchange per coroutine
 A coroutine SHALL model exactly one HTTP exchange. A flow needing several exchanges (device polling, a grant followed by a refresh) SHALL be driven by the caller, which builds a fresh coroutine per exchange.
 

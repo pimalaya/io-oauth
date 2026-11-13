@@ -6,16 +6,18 @@
 
 use core::fmt;
 
-use alloc::{format, string::String};
+use alloc::{string::String, vec::Vec};
 
+use base64_codec::codec::{Base64Alphabet, Base64Codec};
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{Error, Visitor},
 };
+use thiserror::Error as ThisError;
 
 #[cfg(feature = "client")]
-use crate::random::random_chars;
+use crate::{random::random_chars, rfc7636::pkce::UNRESERVED};
 
 // NOTE: VSCHAR = %x20-7E
 const VSCHAR: [u8; 95] = [
@@ -38,13 +40,29 @@ const VSCHAR: [u8; 95] = [
 pub struct Oauth20State(SecretBox<[u8]>);
 
 impl Oauth20State {
-    /// Generates a new random state of custom size.
+    /// Generates a random state of `size` unreserved bytes.
     ///
     /// Panics when the OS random source fails.
     #[cfg(feature = "client")]
     pub fn new(size: u8) -> Self {
-        let random = random_chars(&VSCHAR, size as usize);
+        let random = random_chars(&UNRESERVED, size as usize);
         Self(SecretBox::from(random))
+    }
+
+    /// Builds a state out of 32 random bytes the caller drew.
+    ///
+    /// The bytes are base64url-encoded into 43 characters.
+    pub fn from_entropy(entropy: &[u8; 32]) -> Self {
+        let codec = Base64Codec {
+            alphabet: Base64Alphabet::Url,
+            pad: false,
+            ..Base64Codec::default()
+        };
+
+        let mut state = Vec::new();
+        codec.encode_vec(entropy, &mut state);
+
+        Self(SecretBox::from(state))
     }
 
     /// Exposes the random state bytes.
@@ -64,12 +82,42 @@ impl PartialEq for Oauth20State {
 
 #[cfg(feature = "client")]
 impl Default for Oauth20State {
-    /// Generates a random state of 32 VSCHAR bytes.
+    /// Generates a random state of 32 unreserved bytes.
     ///
     /// Panics when the OS random source fails.
     fn default() -> Self {
         Self::new(32)
     }
+}
+
+impl TryFrom<&[u8]> for Oauth20State {
+    type Error = Oauth20StateError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        // NOTE: state = 1*VSCHAR
+        if bytes.is_empty() {
+            return Err(Oauth20StateError::Empty);
+        }
+
+        for b in bytes {
+            if !VSCHAR.contains(b) {
+                return Err(Oauth20StateError::InvalidByte(*b));
+            }
+        }
+
+        Ok(Self(SecretBox::from(bytes.to_vec())))
+    }
+}
+
+/// Errors returned when building a state out of bytes.
+#[derive(Clone, Debug, Eq, PartialEq, ThisError)]
+pub enum Oauth20StateError {
+    /// The state holds no byte.
+    #[error("Invalid empty state")]
+    Empty,
+    /// The state holds a byte outside the VSCHAR set.
+    #[error("Invalid state byte 0x{0:x}")]
+    InvalidByte(u8),
 }
 
 impl Serialize for Oauth20State {
@@ -100,35 +148,63 @@ impl<'de> Visitor<'de> for StateVisitor {
     }
 
     fn visit_bytes<E: Error>(self, bytes: &[u8]) -> Result<Self::Value, E> {
-        for b in bytes {
-            if !VSCHAR.contains(b) {
-                let err = format!("invalid byte 0x{b:x} found in state");
-                return Err(E::custom(err));
-            }
-        }
-
-        Ok(Oauth20State(SecretBox::from(bytes.to_vec())))
+        Oauth20State::try_from(bytes).map_err(E::custom)
     }
 }
 
-#[cfg(all(test, feature = "client"))]
+#[cfg(test)]
 mod tests {
+    use serde::de::value::{Error, StrDeserializer};
+
     use crate::rfc6749::state::*;
 
-    /// Longer than the 95-character alphabet, so characters repeat.
+    /// Longer than the 66-character alphabet, so characters repeat.
+    #[cfg(feature = "client")]
     #[test]
-    fn a_255_byte_state_holds_255_vschar_bytes() {
+    fn a_255_byte_state_holds_255_unreserved_bytes() {
         let state = Oauth20State::new(255);
 
         assert_eq!(state.expose().len(), 255);
-        assert!(state.expose().iter().all(|b| VSCHAR.contains(b)));
+        assert!(state.expose().iter().all(|b| UNRESERVED.contains(b)));
     }
 
+    #[cfg(feature = "client")]
     #[test]
-    fn the_default_state_holds_32_vschar_bytes() {
+    fn the_default_state_holds_32_unreserved_bytes() {
         let state = Oauth20State::default();
 
         assert_eq!(state.expose().len(), 32);
-        assert!(state.expose().iter().all(|b| VSCHAR.contains(b)));
+        assert!(state.expose().iter().all(|b| UNRESERVED.contains(b)));
+    }
+
+    #[test]
+    fn an_empty_state_does_not_deserialize() {
+        let state = Oauth20State::deserialize(StrDeserializer::<Error>::new(""));
+        assert!(state.is_err());
+    }
+
+    #[test]
+    fn a_state_is_one_or_more_vschar_bytes() {
+        assert_eq!(
+            Oauth20State::try_from(&b""[..]),
+            Err(Oauth20StateError::Empty)
+        );
+        assert_eq!(
+            Oauth20State::try_from(&b"a\nb"[..]),
+            Err(Oauth20StateError::InvalidByte(b'\n'))
+        );
+        assert_eq!(
+            Oauth20State::try_from(&b"a b"[..]).unwrap().expose(),
+            b"a b"
+        );
+    }
+
+    #[test]
+    fn entropy_becomes_43_base64url_bytes() {
+        let state = Oauth20State::from_entropy(&[0xFB; 32]);
+        assert_eq!(
+            state.expose(),
+            "-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_s".as_bytes()
+        );
     }
 }

@@ -44,7 +44,7 @@ use pimalaya_stream::{
 };
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
-use url::Url;
+use url::{Url, form_urlencoded::byte_serialize};
 
 #[cfg(feature = "jwt-bearer")]
 use crate::rfc7523::assertion::{
@@ -62,7 +62,7 @@ use crate::{
 use crate::{
     rfc6749::{
         access_token_request::*, client_credentials::*, issue_access_token::*,
-        refresh_access_token::*,
+        refresh_access_token::*, state::Oauth20State,
     },
     rfc7009::revoke::*,
     rfc7523::{auth_grant::*, client_auth::*},
@@ -150,6 +150,13 @@ pub struct Oauth20ClientStd {
     /// The client identifier.
     pub client_id: String,
     /// The client secret, for confidential clients.
+    ///
+    /// Sent with the client identifier as HTTP Basic credentials, both
+    /// form-urlencoded first: letters, digits and `*-._~` stay literal. Leave
+    /// the `client_secret` of the request params unset then: a client
+    /// authenticates once per request.
+    ///
+    /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-2.3.1>
     pub client_secret: Option<SecretString>,
 }
 
@@ -587,7 +594,9 @@ impl Oauth20ClientStd {
         .header("Host", format!("{host}:{port}"));
 
         if let Some(secret) = &self.client_secret {
-            let creds = HttpAuthBasic::new(self.client_id.clone(), secret.expose_secret());
+            let id = form_urlencode(self.client_id.as_bytes());
+            let secret = form_urlencode(secret.expose_secret().as_bytes());
+            let creds = HttpAuthBasic::new(id, secret);
             request = request.header("Authorization", creds.to_authorization());
         }
 
@@ -605,8 +614,12 @@ impl<T: Read + Write + Send + ?Sized> Oauth20Stream for T {}
 ///
 /// Single-shot: the listener closes once one redirect is handled, answering a
 /// `200 OK` placeholder. The PKCE verifier and original state are the caller's
-/// to track. Connections are filtered as in [`await_redirect_on`].
-pub fn await_redirect(redirect_uri: &Url) -> Result<Url, Oauth20ClientStdError> {
+/// to track and to validate. Connections are filtered as in
+/// [`await_redirect_on`].
+pub fn await_redirect(
+    redirect_uri: &Url,
+    expected_state: Option<&Oauth20State>,
+) -> Result<Url, Oauth20ClientStdError> {
     let host = redirect_uri
         .host_str()
         .ok_or_else(|| Oauth20ClientStdError::UrlMissingHost(redirect_uri.to_string()))?;
@@ -615,7 +628,7 @@ pub fn await_redirect(redirect_uri: &Url) -> Result<Url, Oauth20ClientStdError> 
         .ok_or_else(|| Oauth20ClientStdError::UrlMissingPort(redirect_uri.to_string()))?;
 
     let listener = TcpListener::bind((host, port))?;
-    await_redirect_on(&listener, redirect_uri)
+    await_redirect_on(&listener, redirect_uri, expected_state)
 }
 
 /// Waits on `listener` for the authorization redirect sent to
@@ -626,11 +639,13 @@ pub fn await_redirect(redirect_uri: &Url) -> Result<Url, Oauth20ClientStdError> 
 /// Single-shot, as [`await_redirect`].
 ///
 /// Only a `GET` to the path of `redirect_uri` carrying a `code` or an `error`
-/// ends the wait. Any other connection is dropped: it has 5 seconds to send
-/// a request line of at most 8 KiB, and is answered `404 Not Found`.
+/// ends the wait, and only when it echoes `expected_state` if one is given.
+/// Any other connection is dropped: it has 5 seconds to send a request line
+/// of at most 8 KiB, and is answered `404 Not Found`.
 pub fn await_redirect_on(
     listener: &TcpListener,
     redirect_uri: &Url,
+    expected_state: Option<&Oauth20State>,
 ) -> Result<Url, Oauth20ClientStdError> {
     let scheme = redirect_uri.scheme();
     let host = redirect_uri
@@ -679,8 +694,23 @@ pub fn await_redirect_on(
         };
 
         let redirected = redirected.filter(|url| {
-            let mut keys = url.query_pairs().map(|(key, _)| key);
-            url.path() == redirect_uri.path() && keys.any(|key| key == "code" || key == "error")
+            let mut has_outcome = false;
+            let mut state = None;
+
+            for (key, val) in url.query_pairs() {
+                if key.eq_ignore_ascii_case("code") || key.eq_ignore_ascii_case("error") {
+                    has_outcome = true;
+                } else if key.eq_ignore_ascii_case("state") {
+                    state = Some(val);
+                }
+            }
+
+            let has_state = match expected_state {
+                Some(expected) => state.is_some_and(|got| got.as_bytes() == expected.expose()),
+                None => true,
+            };
+
+            url.path() == redirect_uri.path() && has_outcome && has_state
         });
 
         let Some(redirected) = redirected else {
@@ -697,8 +727,18 @@ pub fn await_redirect_on(
     }
 }
 
+/// Form-urlencodes `bytes`, the RFC 3986 unreserved characters kept literal.
+fn form_urlencode(bytes: &[u8]) -> String {
+    // NOTE: a server comparing the raw credentials only knows a literal `~`
+    byte_serialize(bytes)
+        .map(|part| if part == "%7E" { "~" } else { part })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    use core::{fmt, marker::PhantomData};
+
     use alloc::{format, string::String};
     use std::{
         io::{Read, Write},
@@ -714,13 +754,17 @@ mod tests {
 
     /// Sends `stray` on a first connection, the redirect on a second one,
     /// and returns the path and query the wait ended on.
-    fn await_redirect_after(stray: &'static [u8]) -> String {
+    fn await_redirect_after(stray: &'static [u8], state: Option<&'static [u8]>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let redirect_uri: Url = format!("http://127.0.0.1:{port}/cb").parse().unwrap();
+        let state = state.map(|state| Oauth20State::try_from(state).unwrap());
         let (tx, rx) = mpsc::channel();
 
-        thread::spawn(move || tx.send(await_redirect_on(&listener, &redirect_uri)));
+        thread::spawn(move || {
+            let redirected = await_redirect_on(&listener, &redirect_uri, state.as_ref());
+            tx.send(redirected)
+        });
 
         let mut first = TcpStream::connect(("127.0.0.1", port)).unwrap();
         first.write_all(stray).unwrap();
@@ -739,39 +783,119 @@ mod tests {
         String::from(&redirected[Position::BeforePath..])
     }
 
+    struct DisplayProbe<T>(PhantomData<T>);
+
+    trait DisplayProbeFallback {
+        fn is_display(&self) -> bool {
+            false
+        }
+    }
+
+    impl<T> DisplayProbeFallback for DisplayProbe<T> {}
+
+    impl<T: fmt::Display> DisplayProbe<T> {
+        fn is_display(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn params_carrying_a_secret_are_not_display() {
+        assert!(DisplayProbe::<Oauth20ClientCredentialsRequestParams>(PhantomData).is_display());
+
+        assert!(!DisplayProbe::<Oauth20AccessTokenRequestParams>(PhantomData).is_display());
+        assert!(!DisplayProbe::<Oauth20AccessTokenRefreshParams>(PhantomData).is_display());
+        assert!(!DisplayProbe::<Oauth20DeviceAccessTokenRequestParams>(PhantomData).is_display());
+        assert!(!DisplayProbe::<Oauth20TokenRevokeParams>(PhantomData).is_display());
+        assert!(!DisplayProbe::<Oauth20JwtBearerGrantRequestParams>(PhantomData).is_display());
+        assert!(
+            !DisplayProbe::<Oauth20JwtBearerClientCredentialsRequestParams>(PhantomData)
+                .is_display()
+        );
+    }
+
+    /// Returns the `Authorization` value the client sends for the pair.
+    fn authorization(client_id: &str, client_secret: &str) -> String {
+        let endpoint: Url = "https://example.test/token".parse().unwrap();
+        let mut client = Oauth20ClientStd::new(io::empty(), endpoint.clone(), client_id);
+        client.client_secret = Some(client_secret.into());
+
+        let request = client.build_post_request(&endpoint);
+        let header = request
+            .headers
+            .into_iter()
+            .find(|(name, _)| name == "Authorization");
+
+        header.unwrap().1
+    }
+
+    #[test]
+    fn basic_credentials_are_form_encoded() {
+        // NOTE: the base64 of `client%3Aid:se%2Bcr%25t`
+        assert_eq!(
+            authorization("client:id", "se+cr%t"),
+            "Basic Y2xpZW50JTNBaWQ6c2UlMkJjciUyNXQ="
+        );
+    }
+
+    #[test]
+    fn basic_credentials_keep_unreserved_characters() {
+        // NOTE: the base64 of `client-id.1_a:aB3~x-y.z_w`
+        assert_eq!(
+            authorization("client-id.1_a", "aB3~x-y.z_w"),
+            "Basic Y2xpZW50LWlkLjFfYTphQjN+eC15Lnpfdw=="
+        );
+    }
+
     #[test]
     fn a_request_to_another_path_is_skipped() {
-        let redirected = await_redirect_after(b"GET /favicon.ico HTTP/1.1\r\n\r\n");
+        let redirected = await_redirect_after(b"GET /favicon.ico HTTP/1.1\r\n\r\n", None);
         assert_eq!(redirected, "/cb?code=c&state=s");
     }
 
     #[test]
     fn a_request_without_code_or_error_is_skipped() {
-        let redirected = await_redirect_after(b"GET /cb?state=s HTTP/1.1\r\n\r\n");
+        let redirected = await_redirect_after(b"GET /cb?state=s HTTP/1.1\r\n\r\n", None);
         assert_eq!(redirected, "/cb?code=c&state=s");
     }
 
     #[test]
     fn a_request_that_is_not_a_get_is_skipped() {
-        let redirected = await_redirect_after(b"POST /cb?code=x&state=y HTTP/1.1\r\n\r\n");
+        let stray = b"POST /cb?code=x&state=y HTTP/1.1\r\n\r\n";
+        let redirected = await_redirect_after(stray, None);
         assert_eq!(redirected, "/cb?code=c&state=s");
     }
 
     #[test]
     fn a_target_outside_origin_form_is_skipped() {
-        let redirected = await_redirect_after(b"GET @x.test/cb?code=x&state=y HTTP/1.1\r\n\r\n");
+        let stray = b"GET @x.test/cb?code=x&state=y HTTP/1.1\r\n\r\n";
+        let redirected = await_redirect_after(stray, None);
         assert_eq!(redirected, "/cb?code=c&state=s");
     }
 
     #[test]
     fn a_request_line_over_the_cap_is_skipped() {
-        let redirected = await_redirect_after(&[b'A'; 16 * 1024]);
+        let redirected = await_redirect_after(&[b'A'; 16 * 1024], None);
         assert_eq!(redirected, "/cb?code=c&state=s");
     }
 
     #[test]
     fn a_silent_connection_is_dropped_after_the_read_timeout() {
-        let redirected = await_redirect_after(b"");
+        let redirected = await_redirect_after(b"", None);
+        assert_eq!(redirected, "/cb?code=c&state=s");
+    }
+
+    #[test]
+    fn a_request_echoing_another_state_is_skipped() {
+        let stray = b"GET /cb?code=x&state=forged HTTP/1.1\r\n\r\n";
+        let redirected = await_redirect_after(stray, Some(b"s"));
+        assert_eq!(redirected, "/cb?code=c&state=s");
+    }
+
+    #[test]
+    fn a_request_echoing_no_state_is_skipped() {
+        let stray = b"GET /cb?error=access_denied HTTP/1.1\r\n\r\n";
+        let redirected = await_redirect_after(stray, Some(b"s"));
         assert_eq!(redirected, "/cb?code=c&state=s");
     }
 
@@ -791,7 +915,8 @@ mod tests {
             answer
         });
 
-        let redirected = await_redirect_on(&listener, &redirect_uri).unwrap();
+        let state = Oauth20State::try_from(&b"s"[..]).unwrap();
+        let redirected = await_redirect_on(&listener, &redirect_uri, Some(&state)).unwrap();
         let answer = browser.join().unwrap();
 
         assert_eq!(
@@ -899,7 +1024,7 @@ mod tests {
             answer
         });
 
-        let redirected = await_redirect_on(&listener, &redirect_uri).unwrap();
+        let redirected = await_redirect_on(&listener, &redirect_uri, None).unwrap();
         assert_eq!(
             redirected.as_str(),
             format!("http://127.0.0.1:{port}/cb?code=c&state=s")

@@ -8,7 +8,7 @@
 use alloc::string::String;
 
 use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 
 /// The access token response: success params, or error params.
 ///
@@ -24,12 +24,16 @@ pub struct Oauth20AccessTokenSuccessParams {
     /// The issued access token.
     #[serde(serialize_with = "serialize_secret_string")]
     pub access_token: SecretString,
-    /// The type of the token issued (usually `Bearer`).
+    /// The type of the token issued, `Bearer` when the server sends none.
     ///
     /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-7.1>
+    #[serde(default = "default_token_type")]
     pub token_type: String,
     /// The lifetime of the access token, in seconds.
-    pub expires_in: Option<usize>,
+    ///
+    /// Read from a number or from a numeric string.
+    #[serde(default, deserialize_with = "deserialize_expires_in")]
+    pub expires_in: Option<u64>,
     /// The refresh token, to obtain new access tokens from the same grant.
     ///
     /// Refs: <https://datatracker.ietf.org/doc/html/rfc6749#section-6>
@@ -210,6 +214,25 @@ pub enum Oauth20AccessTokenErrorCode {
     /// Any unregistered code, kept for provider-specific extensions.
     #[serde(other)]
     Unknown,
+}
+
+fn default_token_type() -> String {
+    String::from("Bearer")
+}
+
+fn deserialize_expires_in<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum ExpiresIn {
+        Number(u64),
+        String(String),
+    }
+
+    match Option::<ExpiresIn>::deserialize(d)? {
+        None => Ok(None),
+        Some(ExpiresIn::Number(secs)) => Ok(Some(secs)),
+        Some(ExpiresIn::String(secs)) => secs.parse().map(Some).map_err(Error::custom),
+    }
 }
 
 fn serialize_secret_string<S: Serializer>(secret: &SecretString, s: S) -> Result<S::Ok, S::Error> {

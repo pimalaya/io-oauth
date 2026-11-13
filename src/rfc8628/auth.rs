@@ -97,6 +97,9 @@ pub enum Oauth20DeviceAuthRequestError {
     /// The HTTP response could not be parsed.
     #[error(transparent)]
     ParseHttpResponse(#[from] serde_json::Error),
+    /// The server answered an error status without an OAuth error body.
+    #[error("Unexpected device authorization status {0}")]
+    Status(u16),
     /// The server answered with an unexpected redirection.
     #[error("Unexpected redirection {code} to {url}")]
     Redirect {
@@ -165,7 +168,10 @@ impl Oauth20DeviceAuthRequest {
 
                 match Oauth20AccessTokenErrorParams::try_from(response.body.as_slice()) {
                     Ok(res) => Oauth20DeviceAuthRequestResult::Ok(Err(res)),
-                    Err(err) => Oauth20DeviceAuthRequestResult::Err(err.into()),
+                    Err(_) => {
+                        let err = Oauth20DeviceAuthRequestError::Status(*response.status);
+                        Oauth20DeviceAuthRequestResult::Err(err)
+                    }
                 }
             }
             HttpCoroutineState::Yielded(HttpSendYield::WantsRead) => {
@@ -283,9 +289,44 @@ fn default_interval() -> usize {
 mod tests {
     use core::time::Duration;
 
-    use alloc::format;
+    use alloc::{format, vec::Vec};
+
+    use io_http::rfc9110::request::HttpRequest;
+    use url::Url;
 
     use crate::rfc8628::auth::*;
+
+    #[test]
+    fn an_error_status_without_oauth_body_returns_its_status() {
+        let request = HttpRequest {
+            method: "POST".into(),
+            url: Url::parse("https://example.test/device").unwrap(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+
+        let params = Oauth20DeviceAuthRequestParams {
+            client_id: "client".into(),
+            scope: Default::default(),
+        };
+
+        let mut coroutine = Oauth20DeviceAuthRequest::new(request, params);
+        let response = b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
+        let mut arg = None;
+
+        let result = loop {
+            match coroutine.resume(arg.take()) {
+                Oauth20DeviceAuthRequestResult::WantsWrite(_) => {}
+                Oauth20DeviceAuthRequestResult::WantsRead => arg = Some(response.as_slice()),
+                result => break result,
+            }
+        };
+
+        assert!(matches!(
+            result,
+            Oauth20DeviceAuthRequestResult::Err(Oauth20DeviceAuthRequestError::Status(503))
+        ));
+    }
 
     fn params(expires_in: u64, interval: u64) -> Oauth20DeviceAuthSuccessParams {
         let json = format!(
