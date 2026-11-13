@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: Changed the pimalaya-stream dependency to 0.4.
+
+  Its `tls::Tls` moved the trusted certificate from `cert` to `server`, and gained `client`, the certificate presented when the server asks for one (mutual TLS).
+
+- **BREAKING**: Changed the io-http dependency to 0.8.
+
 ## [0.6.0] - 2026-11-13
 
 ### Added

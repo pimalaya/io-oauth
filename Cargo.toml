@@ -49,9 +49,9 @@ rustls-platform-verifier = "0.7"
 anyhow = { version = "1", default-features = false, optional = true }
 base64-codec = { version = "0.1", default-features = false, features = ["alloc"] }
 getrandom = { version = "0.4", default-features = false, optional = true }
-io-http = { version = "0.7", default-features = false }
+io-http = { version = "0.8", default-features = false }
 log = { version = "0.4", default-features = false }
-pimalaya-stream = { version = "0.3", default-features = false, optional = true }
+pimalaya-stream = { version = "0.4", default-features = false, optional = true }
 rsa = { version = "0.10", default-features = false, features = ["encoding", "pkcs1v15"], optional = true }
 secrecy = { version = "0.10", default-features = false, features = ["serde"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
