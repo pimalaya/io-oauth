@@ -51,8 +51,9 @@ pub struct Oauth20AccessTokenSuccessParams {
 /// Parses an HTTP IMF-fixdate into Unix epoch seconds (UTC).
 ///
 /// Format: `Sun, 06 Nov 1994 08:49:37 GMT` (29 ASCII bytes); returns `None` on
-/// any structural deviation. Does not check that the day-of-month is legal for
-/// the month/year, relying on origin servers to send well-formed dates.
+/// any structural deviation, on a day zero and on a date before the epoch.
+/// Does not check that the day-of-month is legal for the month/year, relying
+/// on origin servers to send well-formed dates.
 pub fn parse_http_date(s: &str) -> Option<u64> {
     let b = s.as_bytes();
 
@@ -60,8 +61,13 @@ pub fn parse_http_date(s: &str) -> Option<u64> {
         return None;
     }
 
-    let day = parse_2_digits(&b[5..7])? as u64;
-    let month: u64 = match &b[8..11] {
+    let day = parse_2_digits(&b[5..7])? as i64;
+
+    if day == 0 {
+        return None;
+    }
+
+    let month: i64 = match &b[8..11] {
         b"Jan" => 1,
         b"Feb" => 2,
         b"Mar" => 3,
@@ -76,10 +82,10 @@ pub fn parse_http_date(s: &str) -> Option<u64> {
         b"Dec" => 12,
         _ => return None,
     };
-    let year = parse_4_digits(&b[12..16])? as u64;
-    let hour = parse_2_digits(&b[17..19])? as u64;
-    let min = parse_2_digits(&b[20..22])? as u64;
-    let sec = parse_2_digits(&b[23..25])? as u64;
+    let year = parse_4_digits(&b[12..16])? as i64;
+    let hour = parse_2_digits(&b[17..19])? as i64;
+    let min = parse_2_digits(&b[20..22])? as i64;
+    let sec = parse_2_digits(&b[23..25])? as i64;
 
     // NOTE: Howard Hinnant's days_from_civil algorithm; treats March as the
     // first month so the leap day lands at the end of the year.
@@ -88,13 +94,14 @@ pub fn parse_http_date(s: &str) -> Option<u64> {
     } else {
         (year, month - 3)
     };
-    let era = y / 400;
-    let yoe = y - era * 400;
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
     let doy = (153 * m + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days_from_epoch = era * 146097 + doe - 719468;
+    let secs_from_epoch = days_from_epoch * 86400 + hour * 3600 + min * 60 + sec;
 
-    Some(days_from_epoch * 86400 + hour * 3600 + min * 60 + sec)
+    u64::try_from(secs_from_epoch).ok()
 }
 
 fn parse_2_digits(b: &[u8]) -> Option<u32> {
@@ -216,5 +223,40 @@ fn serialize_opt_secret_string<S: Serializer>(
     match secret {
         Some(secret) => serialize_secret_string(secret, s),
         None => s.serialize_none(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::rfc6749::issue_access_token::*;
+
+    #[test]
+    fn http_date_returns_epoch_seconds() {
+        let date = parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT");
+        assert_eq!(date, Some(784111777));
+    }
+
+    #[test]
+    fn http_date_at_the_epoch_returns_zero() {
+        let date = parse_http_date("Thu, 01 Jan 1970 00:00:00 GMT");
+        assert_eq!(date, Some(0));
+    }
+
+    #[test]
+    fn http_date_before_the_epoch_returns_none() {
+        let date = parse_http_date("Wed, 31 Dec 1969 23:59:59 GMT");
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn http_date_in_year_zero_returns_none() {
+        let date = parse_http_date("Sat, 01 Jan 0000 00:00:00 GMT");
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn http_date_with_day_zero_returns_none() {
+        let date = parse_http_date("Sat, 00 Mar 2026 00:00:00 GMT");
+        assert_eq!(date, None);
     }
 }

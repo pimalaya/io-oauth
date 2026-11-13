@@ -9,6 +9,8 @@
 //! alongside, unified behind a version-agnostic `OauthClientStd` wrapper only
 //! once one exists.
 
+use core::str;
+
 use alloc::{
     boxed::Box,
     format,
@@ -16,28 +18,17 @@ use alloc::{
     vec::Vec,
 };
 
-#[cfg(all(
-    feature = "jwt-bearer",
-    not(any(
-        feature = "rustls-aws",
-        feature = "rustls-ring",
-        feature = "native-tls"
-    ))
-))]
-use std::time::Duration;
-#[cfg(feature = "jwt-bearer")]
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::{
-    io::{self, BufRead, BufReader, Read, Write},
-    net::{Shutdown, TcpListener},
-};
 #[cfg(any(
     feature = "rustls-aws",
     feature = "rustls-ring",
     feature = "native-tls"
 ))]
+use std::thread;
+#[cfg(feature = "jwt-bearer")]
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
-    thread,
+    io::{self, Read, Write},
+    net::{Shutdown, TcpListener},
     time::{Duration, Instant},
 };
 
@@ -80,6 +71,8 @@ use crate::{
 };
 
 const READ_BUFFER_SIZE: usize = 8 * 1024;
+const REDIRECT_LINE_MAX: usize = 8 * 1024;
+const REDIRECT_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Errors returned by [`Oauth20ClientStd`].
 #[derive(Debug, Error)]
@@ -146,9 +139,6 @@ pub enum Oauth20ClientStdError {
         /// The unsupported scheme it carries.
         scheme: String,
     },
-    /// The redirect server received a malformed HTTP request.
-    #[error("Malformed HTTP request received on redirect server: `{0}`")]
-    InvalidRedirectRequest(String),
 }
 
 /// Std-blocking OAuth 2.0 client wrapping a single boxed stream.
@@ -471,6 +461,9 @@ impl Oauth20ClientStd {
     /// on `slow_down`), reconnects each attempt since servers rarely keep the
     /// socket alive, and gives up with
     /// [`Oauth20ClientStdError::DeviceCodeExpired`] past the code lifetime.
+    /// Both come bounded from [`Oauth20DeviceAuthSuccessParams::lifetime`] and
+    /// [`Oauth20DeviceAuthSuccessParams::poll_interval`], and no sleep
+    /// outlasts the lifetime.
     #[cfg(any(
         feature = "rustls-aws",
         feature = "rustls-ring",
@@ -481,13 +474,15 @@ impl Oauth20ClientStd {
         tls: &Tls,
         device: &Oauth20DeviceAuthSuccessParams,
     ) -> Result<Oauth20AccessTokenResponse, Oauth20ClientStdError> {
-        let deadline = Instant::now() + Duration::from_secs(device.expires_in as u64);
-        let mut interval = Duration::from_secs(device.interval as u64);
+        let lifetime = device.lifetime();
+        let mut interval = device.poll_interval();
+        let start = Instant::now();
 
         loop {
-            thread::sleep(interval);
+            let left = lifetime.saturating_sub(start.elapsed());
+            thread::sleep(interval.min(left));
 
-            if Instant::now() >= deadline {
+            if start.elapsed() >= lifetime {
                 return Err(Oauth20ClientStdError::DeviceCodeExpired);
             }
 
@@ -507,7 +502,7 @@ impl Oauth20ClientStd {
                 Err(err) => match err.error {
                     Oauth20AccessTokenErrorCode::AuthorizationPending => continue,
                     Oauth20AccessTokenErrorCode::SlowDown => {
-                        interval += Duration::from_secs(5);
+                        interval = interval.saturating_add(Duration::from_secs(5));
                     }
                     _ => return Ok(Err(err)),
                 },
@@ -610,7 +605,7 @@ impl<T: Read + Write + Send + ?Sized> Oauth20Stream for T {}
 ///
 /// Single-shot: the listener closes once one redirect is handled, answering a
 /// `200 OK` placeholder. The PKCE verifier and original state are the caller's
-/// to track.
+/// to track. Connections are filtered as in [`await_redirect_on`].
 pub fn await_redirect(redirect_uri: &Url) -> Result<Url, Oauth20ClientStdError> {
     let host = redirect_uri
         .host_str()
@@ -629,6 +624,10 @@ pub fn await_redirect(redirect_uri: &Url) -> Result<Url, Oauth20ClientStdError> 
 /// The caller binds the listener, typically before handing out the
 /// authorization URL, so no other process can take the port in between.
 /// Single-shot, as [`await_redirect`].
+///
+/// Only a `GET` to the path of `redirect_uri` carrying a `code` or an `error`
+/// ends the wait. Any other connection is dropped: it has 5 seconds to send
+/// a request line of at most 8 KiB, and is answered `404 Not Found`.
 pub fn await_redirect_on(
     listener: &TcpListener,
     redirect_uri: &Url,
@@ -641,26 +640,61 @@ pub fn await_redirect_on(
         .port_or_known_default()
         .ok_or_else(|| Oauth20ClientStdError::UrlMissingPort(redirect_uri.to_string()))?;
 
-    let (mut stream, _) = listener.accept()?;
-    let mut reader = BufReader::new(&mut stream);
+    loop {
+        let (mut stream, _) = listener.accept()?;
+        let start = Instant::now();
+        let mut head = [0u8; REDIRECT_LINE_MAX];
+        let mut len = 0;
 
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
+        while len < head.len() && !head[..len].contains(&b'\n') {
+            let left = REDIRECT_READ_TIMEOUT.saturating_sub(start.elapsed());
 
-    let redirected_path = request_line
-        .split_whitespace()
-        .nth(1)
-        .ok_or_else(|| Oauth20ClientStdError::InvalidRedirectRequest(request_line.clone()))?;
+            if left.is_zero() || stream.set_read_timeout(Some(left)).is_err() {
+                break;
+            }
 
-    let redirected_uri: Url = format!("{scheme}://{host}:{port}{redirected_path}")
-        .parse()
-        .map_err(|_| Oauth20ClientStdError::InvalidRedirectRequest(request_line.clone()))?;
+            match stream.read(&mut head[len..]) {
+                Ok(0) => break,
+                Ok(n) => len += n,
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
 
-    let stream = reader.into_inner();
-    stream.write_all(b"HTTP/1.0 200 OK\r\n\r\nAuthorization succeeded!")?;
-    stream.shutdown(Shutdown::Both)?;
+        let line = match head[..len].iter().position(|byte| *byte == b'\n') {
+            Some(end) => str::from_utf8(&head[..end]).unwrap_or_default(),
+            None => "",
+        };
 
-    Ok(redirected_uri)
+        let mut tokens = line.split_ascii_whitespace();
+        let method = tokens.next();
+        let target = tokens.next().unwrap_or_default();
+
+        let redirected = if method == Some("GET") && target.starts_with('/') {
+            format!("{scheme}://{host}:{port}{target}")
+                .parse::<Url>()
+                .ok()
+        } else {
+            None
+        };
+
+        let redirected = redirected.filter(|url| {
+            let mut keys = url.query_pairs().map(|(key, _)| key);
+            url.path() == redirect_uri.path() && keys.any(|key| key == "code" || key == "error")
+        });
+
+        let Some(redirected) = redirected else {
+            let _ = stream.write_all(b"HTTP/1.0 404 Not Found\r\n\r\n");
+            continue;
+        };
+
+        let page =
+            b"HTTP/1.0 200 OK\r\n\r\nAuthorization response received, you can close this page";
+        let _ = stream.write_all(page);
+        let _ = stream.shutdown(Shutdown::Both);
+
+        return Ok(redirected);
+    }
 }
 
 #[cfg(test)]
@@ -669,12 +703,185 @@ mod tests {
     use std::{
         io::{Read, Write},
         net::{TcpListener, TcpStream},
+        sync::mpsc,
         thread,
+        time::Duration,
     };
 
-    use url::Url;
+    use url::{Position, Url};
 
-    use super::await_redirect_on;
+    use crate::client::*;
+
+    /// Sends `stray` on a first connection, the redirect on a second one,
+    /// and returns the path and query the wait ended on.
+    fn await_redirect_after(stray: &'static [u8]) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let redirect_uri: Url = format!("http://127.0.0.1:{port}/cb").parse().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || tx.send(await_redirect_on(&listener, &redirect_uri)));
+
+        let mut first = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        first.write_all(stray).unwrap();
+
+        let mut second = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        second
+            .write_all(b"GET /cb?code=c&state=s HTTP/1.1\r\nHost: x\r\n\r\n")
+            .unwrap();
+
+        let redirected = rx
+            .recv_timeout(Duration::from_secs(15))
+            .expect("the wait should end on the second connection")
+            .unwrap();
+
+        drop(first);
+        String::from(&redirected[Position::BeforePath..])
+    }
+
+    #[test]
+    fn a_request_to_another_path_is_skipped() {
+        let redirected = await_redirect_after(b"GET /favicon.ico HTTP/1.1\r\n\r\n");
+        assert_eq!(redirected, "/cb?code=c&state=s");
+    }
+
+    #[test]
+    fn a_request_without_code_or_error_is_skipped() {
+        let redirected = await_redirect_after(b"GET /cb?state=s HTTP/1.1\r\n\r\n");
+        assert_eq!(redirected, "/cb?code=c&state=s");
+    }
+
+    #[test]
+    fn a_request_that_is_not_a_get_is_skipped() {
+        let redirected = await_redirect_after(b"POST /cb?code=x&state=y HTTP/1.1\r\n\r\n");
+        assert_eq!(redirected, "/cb?code=c&state=s");
+    }
+
+    #[test]
+    fn a_target_outside_origin_form_is_skipped() {
+        let redirected = await_redirect_after(b"GET @x.test/cb?code=x&state=y HTTP/1.1\r\n\r\n");
+        assert_eq!(redirected, "/cb?code=c&state=s");
+    }
+
+    #[test]
+    fn a_request_line_over_the_cap_is_skipped() {
+        let redirected = await_redirect_after(&[b'A'; 16 * 1024]);
+        assert_eq!(redirected, "/cb?code=c&state=s");
+    }
+
+    #[test]
+    fn a_silent_connection_is_dropped_after_the_read_timeout() {
+        let redirected = await_redirect_after(b"");
+        assert_eq!(redirected, "/cb?code=c&state=s");
+    }
+
+    #[test]
+    fn a_redirect_carrying_an_error_is_not_answered_as_a_success() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let redirect_uri: Url = format!("http://127.0.0.1:{port}/cb").parse().unwrap();
+
+        let browser = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream
+                .write_all(b"GET /cb?error=access_denied&state=s HTTP/1.1\r\nHost: x\r\n\r\n")
+                .unwrap();
+            let mut answer = String::new();
+            stream.read_to_string(&mut answer).unwrap();
+            answer
+        });
+
+        let redirected = await_redirect_on(&listener, &redirect_uri).unwrap();
+        let answer = browser.join().unwrap();
+
+        assert_eq!(
+            &redirected[Position::BeforePath..],
+            "/cb?error=access_denied&state=s"
+        );
+        assert!(answer.starts_with("HTTP/1.0 200 OK"));
+        assert!(!answer.contains("succeeded"), "{answer}");
+    }
+
+    #[cfg(any(
+        feature = "rustls-aws",
+        feature = "rustls-ring",
+        feature = "native-tls"
+    ))]
+    #[test]
+    fn a_device_lifetime_beyond_the_clock_range_does_not_panic() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let token_endpoint: Url = format!("http://127.0.0.1:{port}/token").parse().unwrap();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+
+            while !request.ends_with(b"device_code=device") {
+                let n = stream.read(&mut buf).unwrap();
+                assert_ne!(n, 0);
+                request.extend_from_slice(&buf[..n]);
+            }
+
+            let body = r#"{"access_token":"token","token_type":"Bearer"}"#;
+            let len = body.len();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n{body}"
+            )
+            .unwrap();
+        });
+
+        let device = Oauth20DeviceAuthSuccessParams {
+            device_code: SecretString::from("device"),
+            user_code: String::new(),
+            verification_uri: String::new(),
+            verification_uri_complete: None,
+            expires_in: usize::MAX,
+            interval: 0,
+        };
+
+        let mut client = Oauth20ClientStd::new(io::empty(), token_endpoint, "client");
+        let response = client.await_device_access_token(&Tls::default(), &device);
+
+        assert!(matches!(response, Ok(Ok(_))));
+        server.join().unwrap();
+    }
+
+    #[cfg(any(
+        feature = "rustls-aws",
+        feature = "rustls-ring",
+        feature = "native-tls"
+    ))]
+    #[test]
+    fn a_device_interval_beyond_the_lifetime_does_not_outlast_it() {
+        let token_endpoint: Url = "http://127.0.0.1:1/token".parse().unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let device = Oauth20DeviceAuthSuccessParams {
+            device_code: SecretString::from("device"),
+            user_code: String::new(),
+            verification_uri: String::new(),
+            verification_uri_complete: None,
+            expires_in: 1,
+            interval: usize::MAX,
+        };
+
+        thread::spawn(move || {
+            let mut client = Oauth20ClientStd::new(io::empty(), token_endpoint, "client");
+            tx.send(client.await_device_access_token(&Tls::default(), &device))
+        });
+
+        let response = rx
+            .recv_timeout(Duration::from_secs(15))
+            .expect("the wait should end with the device code lifetime");
+
+        assert!(matches!(
+            response,
+            Err(Oauth20ClientStdError::DeviceCodeExpired)
+        ));
+    }
 
     #[test]
     fn a_caller_bound_listener_returns_the_redirect() {

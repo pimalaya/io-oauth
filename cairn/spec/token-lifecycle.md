@@ -15,7 +15,7 @@ The token endpoint response SHALL parse into either the success params (access t
 The success params SHALL carry the issuance instant in Unix epoch seconds, read from the HTTP `Date` header and left unset when the server sent none. It sits outside the OAuth specs so the caller can compute expiry as issuance plus lifetime against its own clock, the crate reading none.
 
 ### Requirement: Date parsing
-The `Date` header SHALL be parsed as an IMF-fixdate of exactly 29 ASCII bytes, yielding nothing on any structural deviation. Day-of-month legality SHALL NOT be checked, origin servers being trusted to send well-formed dates.
+The `Date` header SHALL be parsed as an IMF-fixdate of exactly 29 ASCII bytes, yielding nothing on any structural deviation, on a day zero and on a date before the Unix epoch. Day-of-month legality SHALL NOT be checked beyond that, origin servers being trusted to send well-formed dates.
 
 ### Requirement: Token error codes
 The token error response SHALL carry a typed error code covering the RFC 6749 section 5.2 set, the RFC 8628 section 3.5 device codes (`authorization_pending`, `slow_down`, `authorization_declined`, `expired_token`), the RFC 8707 `invalid_target` and the non-standard Microsoft Entra codes, with an unknown arm keeping any unregistered code verbatim.

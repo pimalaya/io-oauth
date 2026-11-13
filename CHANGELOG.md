@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added `rfc8628::auth::Oauth20DeviceAuthSuccessParams::lifetime`, the device code lifetime capped at one hour.
+- Added `rfc8628::auth::Oauth20DeviceAuthSuccessParams::poll_interval`, the polling interval kept between 1 and 60 seconds.
+
+### Changed
+
+- Changed `client::await_redirect` and `client::await_redirect_on` to wait for a `GET` to the redirect path carrying a `code` or an `error`.
+
+  Any other connection is answered `404 Not Found` and dropped, after at most 5 seconds and an 8 KiB request line. The `200 OK` page no longer claims a success.
+
+### Removed
+
+- **BREAKING**: Removed `client::Oauth20ClientStdError::InvalidRedirectRequest`.
+
+  A malformed request no longer ends the wait on the redirect.
+
+### Fixed
+
+- Fixed `client::Oauth20ClientStd::await_device_access_token` panicking or sleeping without end on a server-chosen `expires_in` or `interval`.
+
+  Both are bounded, and no sleep outlasts the device code lifetime.
+
+- Fixed `rfc6749::issue_access_token::parse_http_date` overflowing on a day zero or a date before 1970.
+
+  It returns `None`, where a release build returned a wrapped date.
+
 ## [0.5.2] - 2026-11-11
 
 ### Changed

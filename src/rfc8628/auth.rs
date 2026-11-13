@@ -53,7 +53,7 @@
 //! # let _ = response;
 //! ```
 
-use core::fmt;
+use core::{fmt, time::Duration};
 
 use alloc::{
     borrow::Cow,
@@ -77,6 +77,10 @@ use thiserror::Error;
 use url::{Url, form_urlencoded::Serializer};
 
 use crate::rfc6749::issue_access_token::Oauth20AccessTokenErrorParams;
+
+const LIFETIME_MAX: Duration = Duration::from_secs(60 * 60);
+const POLL_INTERVAL_MIN: Duration = Duration::from_secs(1);
+const POLL_INTERVAL_MAX: Duration = Duration::from_secs(60);
 
 /// The device authorization response: success params, or error params.
 ///
@@ -205,6 +209,18 @@ pub struct Oauth20DeviceAuthSuccessParams {
     pub interval: usize,
 }
 
+impl Oauth20DeviceAuthSuccessParams {
+    /// The lifetime of the device and user codes, capped at one hour.
+    pub fn lifetime(&self) -> Duration {
+        Duration::from_secs(self.expires_in as u64).min(LIFETIME_MAX)
+    }
+
+    /// The wait between two polls, kept between 1 and 60 seconds.
+    pub fn poll_interval(&self) -> Duration {
+        Duration::from_secs(self.interval as u64).clamp(POLL_INTERVAL_MIN, POLL_INTERVAL_MAX)
+    }
+}
+
 /// Deserializes success params from JSON bytes.
 impl TryFrom<&[u8]> for Oauth20DeviceAuthSuccessParams {
     type Error = serde_json::Error;
@@ -261,4 +277,43 @@ impl fmt::Display for Oauth20DeviceAuthRequestParams<'_> {
 
 fn default_interval() -> usize {
     5
+}
+
+#[cfg(test)]
+mod tests {
+    use core::time::Duration;
+
+    use alloc::format;
+
+    use crate::rfc8628::auth::*;
+
+    fn params(expires_in: u64, interval: u64) -> Oauth20DeviceAuthSuccessParams {
+        let json = format!(
+            r#"{{"device_code":"d","user_code":"u","verification_uri":"https://example.test","expires_in":{expires_in},"interval":{interval}}}"#
+        );
+
+        Oauth20DeviceAuthSuccessParams::try_from(json.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn a_lifetime_and_interval_in_range_are_kept() {
+        let params = params(900, 5);
+
+        assert_eq!(params.lifetime(), Duration::from_secs(900));
+        assert_eq!(params.poll_interval(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_lifetime_and_interval_out_of_range_are_capped() {
+        let params = params(4_000_000_000, 4_000_000_000);
+
+        assert_eq!(params.lifetime(), Duration::from_secs(3600));
+        assert_eq!(params.poll_interval(), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn a_zero_interval_waits_one_second() {
+        let params = params(900, 0);
+        assert_eq!(params.poll_interval(), Duration::from_secs(1));
+    }
 }
