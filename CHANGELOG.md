@@ -40,6 +40,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
   An empty state no longer deserializes.
 
+- **BREAKING**: Changed the io-http dependency to 0.7.
+
+  A request whose method or headers cannot be serialised fails the first resume with `Http11SendError::InvalidRequest`, before any write.
+
 ### Removed
 
 - **BREAKING**: Removed `client::Oauth20ClientStdError::InvalidRedirectRequest`.

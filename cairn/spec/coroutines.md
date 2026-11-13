@@ -30,6 +30,14 @@ A non-success status whose body is not the OAuth error object SHALL surface, in 
 - WHEN the endpoint answers 503 with an HTML page
 - THEN the coroutine ends with an error carrying 503
 
+### Requirement: Invalid request head
+A request whose method or header name is not a token, whose header value holds a CR, a LF or a NUL, or which sets `Transfer-Encoding`, SHALL fail the first `resume` of every coroutine with its send error wrapping `Http11SendError::InvalidRequest`, before any write request.
+
+#### Scenario: Header value holds a line break
+- GIVEN a request carrying a header whose value holds a CRLF
+- WHEN the caller resumes the coroutine for the first time
+- THEN the coroutine ends with an invalid request error naming the header, and nothing was handed out to write
+
 ### Requirement: One exchange per coroutine
 A coroutine SHALL model exactly one HTTP exchange. A flow needing several exchanges (device polling, a grant followed by a refresh) SHALL be driven by the caller, which builds a fresh coroutine per exchange.
 

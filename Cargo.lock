@@ -573,9 +573,9 @@ dependencies = [
 
 [[package]]
 name = "io-http"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a9086cd840a757b9dd4105caad54a59fdb440c49be33882491a07274ca32e06"
+checksum = "9d195f9fce7b6202be9ec43c8f93e057006ddd5c9223258789606839aea62182"
 dependencies = [
  "anyhow",
  "base64-codec",

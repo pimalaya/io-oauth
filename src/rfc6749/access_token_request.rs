@@ -263,19 +263,28 @@ impl Oauth20AccessTokenRequest {
 mod tests {
     use alloc::{format, string::String, vec, vec::Vec};
 
-    use io_http::rfc9110::request::HttpRequest;
+    use io_http::{
+        rfc9110::request::{HttpRequest, HttpRequestError},
+        rfc9112::send::Http11SendError,
+    };
     use url::Url;
 
     use crate::rfc6749::{access_token_request::*, issue_access_token::*};
 
-    fn coroutine(code: &'static str) -> Oauth20AccessTokenRequest {
-        let request = HttpRequest {
+    fn request() -> HttpRequest {
+        HttpRequest {
             method: "POST".into(),
             url: Url::parse("https://example.test/token").unwrap(),
             headers: Vec::new(),
             body: Vec::new(),
-        };
+        }
+    }
 
+    fn coroutine(code: &'static str) -> Oauth20AccessTokenRequest {
+        coroutine_from(request(), code)
+    }
+
+    fn coroutine_from(request: HttpRequest, code: &'static str) -> Oauth20AccessTokenRequest {
         let params = Oauth20AccessTokenRequestParams {
             code: code.into(),
             redirect_uri: None,
@@ -357,6 +366,24 @@ mod tests {
             result,
             Oauth20AccessTokenRequestResult::Err(Oauth20AccessTokenRequestError::Status(503))
         ));
+    }
+
+    #[test]
+    fn a_header_value_holding_a_line_break_fails_before_any_write() {
+        let request = request().header("X-Tenant", "a\r\nX-Injected: b");
+        let mut coroutine = coroutine_from(request, "code");
+
+        let Oauth20AccessTokenRequestResult::Err(err) = coroutine.resume(None) else {
+            panic!("expected an error at the first resume");
+        };
+
+        let Oauth20AccessTokenRequestError::SendHttpRequest(err) = err else {
+            panic!("expected a send error, got {err:?}");
+        };
+
+        let name = "X-Tenant".into();
+        let expected = HttpRequestError::InvalidHeaderValue(name);
+        assert!(matches!(err, Http11SendError::InvalidRequest(err) if err == expected));
     }
 
     #[test]
