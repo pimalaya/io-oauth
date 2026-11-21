@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Moved to io-http 0.9; `client` enables `io-http/client`.
 - **BREAKING**: Renamed the `client` feature, which gated the blocking client, to `std`.
 
   A consumer naming it moves to the new name:
