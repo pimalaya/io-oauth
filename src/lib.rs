@@ -9,8 +9,9 @@
 //! requests instead of performing I/O itself: the caller owns the
 //! socket and pumps the coroutine with the bytes it read, whatever
 //! the runtime (blocking, async, in-memory tests). The `client`
-//! feature ships a ready-made std-blocking pump for callers who just
-//! want a working client.
+//! feature gates the coroutines, and the `std` feature ships a
+//! ready-made std-blocking pump for callers who just want a working
+//! client.
 //!
 //! [io-http]: https://docs.rs/io-http
 //!
@@ -55,7 +56,7 @@
 //! key in [`rfc7523::assertion`] sits behind the `jwt-bearer` feature
 //! since it pulls the rsa and sha1 crates.
 //!
-//! The optional [`client`] module (`client` feature) is the
+//! The optional [`client`] module (`std` feature) is the
 //! std-blocking [`client::Oauth20ClientStd`] pump: a light client
 //! wrapping any stream you opened yourself, or a full client opening
 //! the TCP/TLS connection itself when one of the TLS features is
@@ -90,7 +91,7 @@
 //! ## Conventions
 //!
 //! The crate is no_std with alloc; std only enters behind the
-//! `client` feature. Every public type carries the version-scoped
+//! `std` feature. Every public type carries the version-scoped
 //! `Oauth20` prefix (mirroring io-http's `Http11`), reading from the
 //! largest scope down to the narrowest: [`rfc8628::auth`] exposes
 //! `Oauth20DeviceAuthRequest`, never a bare `DeviceAuthRequest`. Each
@@ -102,16 +103,21 @@
 //! though identifiers otherwise shorten authorization to auth.
 
 extern crate alloc;
-#[cfg(feature = "client")]
+#[cfg(feature = "std")]
 extern crate std;
 
-#[cfg(feature = "client")]
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub mod client;
 #[cfg(feature = "client")]
 mod random;
 pub mod rfc6749;
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub mod rfc7009;
 pub mod rfc7523;
 pub mod rfc7591;
 pub mod rfc7636;
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub mod rfc8628;

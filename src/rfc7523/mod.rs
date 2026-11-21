@@ -13,5 +13,9 @@
 //! rsa and sha1 crates.
 
 pub mod assertion;
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub mod auth_grant;
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub mod client_auth;

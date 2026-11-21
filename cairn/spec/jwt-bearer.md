@@ -21,7 +21,7 @@ Signing SHALL produce a compact JWS: base64url header and claims, signed with RS
 The crate SHALL compute the `x5t` header value from DER certificate bytes as the base64url-encoded SHA-1 thumbprint, which Microsoft requires on assertions signed with certificate credentials.
 
 ### Requirement: Signing is feature-gated
-The claims and the coroutines SHALL be unconditional wire code. Only the signing key and the thumbprint helper SHALL sit behind the `jwt-bearer` feature, since they alone pull the rsa and sha1 crates. A caller signing elsewhere SHALL be able to pass a ready-made assertion without enabling the feature.
+The claims SHALL be unconditional wire code and the coroutines SHALL need the `client` feature, never `jwt-bearer`. Only the signing key and the thumbprint helper SHALL sit behind the `jwt-bearer` feature, since they alone pull the rsa and sha1 crates. A caller signing elsewhere SHALL be able to pass a ready-made assertion without enabling the feature.
 
 ### Requirement: JWT as authorization grant
 The section 2.1 exchange SHALL send `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` with the assertion, no end user round trip and no client secret involved.

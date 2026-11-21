@@ -6,7 +6,7 @@ status: current
 
 # Std-blocking client
 
-The optional `client` feature ships `Oauth20ClientStd`, a ready-made pump for callers who want a working OAuth client rather than a coroutine to drive. It wraps a single boxed blocking stream and inlines the coroutine loop in each method.
+The optional `std` feature ships `Oauth20ClientStd`, a ready-made pump for callers who want a working OAuth client rather than a coroutine to drive. It wraps a single boxed blocking stream and inlines the coroutine loop in each method.
 
 ### Requirement: Stream ownership
 The client SHALL wrap any pre-connected `Read + Write + Send` stream, and SHALL expose a replacement setter so a caller can swap the transport between operations. Under a TLS feature it SHALL also open the connection itself, plain TCP for `http://` and implicit TLS for `https://`, rejecting any other scheme and a URL missing host or port.

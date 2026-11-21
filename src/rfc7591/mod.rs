@@ -4,5 +4,7 @@
 //! provider console, and declares the preference order between the
 //! ways a client obtains its registration.
 
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub mod register;
 pub mod source;

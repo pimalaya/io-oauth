@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: Renamed the `client` feature, which gated the blocking client, to `std`.
+
+  A consumer naming it moves to the new name:
+
+  ```toml
+  # before
+  io-oauth = { version = "0.7", default-features = false, features = ["client"] }
+  # after
+  io-oauth = { version = "0.8", default-features = false, features = ["std"] }
+  ```
+
+- **BREAKING**: Changed the `client` feature to gate the coroutines (`rfc6749::access_token_request`, `rfc6749::client_credentials`, `rfc6749::refresh_access_token`, `rfc7009`, `rfc7523::auth_grant`, `rfc7523::client_auth`, `rfc7591::register`, `rfc8628`), the random state and code verifier generators, and the io-http and getrandom dependencies.
+
+  It is on by default and implied by `std` and the TLS features. A consumer turning default features off to drive the coroutines itself adds it:
+
+  ```toml
+  # before
+  io-oauth = { version = "0.7", default-features = false }
+  # after
+  io-oauth = { version = "0.8", default-features = false, features = ["client"] }
+  ```
+
+- **BREAKING**: Changed the TLS features (`rustls-ring`, `rustls-aws`, `native-tls`) to imply `std`.
+
 ## [0.7.0] - 2026-11-13
 
 ### Changed

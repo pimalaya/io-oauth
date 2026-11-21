@@ -6,13 +6,13 @@ status: current
 
 # Packaging
 
-io-oauth is an I/O-free library following the Pimalaya crate conventions: a no_std core with an optional std-blocking client, dual-licensed MIT OR Apache-2.0.
+io-oauth is an I/O-free library following the Pimalaya crate conventions: a no_std core with feature-gated coroutines and an optional std-blocking client, dual-licensed MIT OR Apache-2.0.
 
 ### Requirement: no_std core
-The crate SHALL be no_std unconditionally, pulling in alloc for its owned buffers. std SHALL be reachable only through the `client` feature.
+The crate SHALL be no_std unconditionally, pulling in alloc for its owned buffers. std SHALL be reachable only through the `std` feature.
 
 ### Requirement: Feature layering
-The crate SHALL expose a `client` feature gating the std-blocking client, one feature per TLS provider (rustls-ring by default, rustls-aws, native-tls) each implying `client` and selecting the matching pimalaya-stream and io-http provider, a `vendored` feature forwarding weakly to them, and a `jwt-bearer` feature gating RS256 signing. This follows the golden rule that a feature is justified only when it changes the crate set.
+The crate SHALL follow the family's layered feature shape (GUIDELINES cargo-006). `client`, on by default, SHALL gate the client side: the coroutines (`rfc6749::access_token_request`, `rfc6749::client_credentials`, `rfc6749::refresh_access_token`, `rfc7009`, `rfc7523::auth_grant`, `rfc7523::client_auth`, `rfc7591::register`, `rfc8628`), the random state and verifier generators, and the io-http and getrandom crates only they need. `std`, implying `client`, SHALL gate the std-blocking client. One feature per TLS provider (rustls-ring by default, rustls-aws, native-tls) SHALL imply `std` and select the matching pimalaya-stream and io-http provider, a `vendored` feature SHALL forward weakly to them, and a `jwt-bearer` feature SHALL gate RS256 signing. The vocabulary (authorization request and response, issued token, state, PKCE, registration source, assertion claims) SHALL compile under no feature. This follows the golden rule that a feature is justified only when it changes the crate set, `client` being the one exception the rule names.
 
 ### Requirement: Source layout
 The source tree SHALL be organised one module per RFC (rfc6749, rfc7009, rfc7523, rfc7591, rfc7636, rfc8628), mirroring io-http, so the RFC number is the version discriminator and no `2.x` wrapper module exists. Code spanning the RFC modules SHALL live at the crate root, which today means the optional client and the private random character helper shared by the state and the PKCE verifier.
